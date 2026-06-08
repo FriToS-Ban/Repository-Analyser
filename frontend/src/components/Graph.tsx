@@ -1,4 +1,4 @@
-import React, { useMemo, useEffect } from "react";
+import React, { useMemo, useEffect, useState } from "react";
 import ReactFlow, {
   MiniMap,
   Controls,
@@ -9,6 +9,7 @@ import ReactFlow, {
 } from "reactflow";
 import "reactflow/dist/style.css";
 import { FileNode } from "./FileNode";
+import { Search, X } from "lucide-react";
 
 interface GraphNode {
   id: string;
@@ -121,6 +122,7 @@ export const Graph: React.FC<GraphProps> = ({ data, onSelectFile }) => {
 
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+  const [searchQuery, setSearchQuery] = useState("");
 
   useEffect(() => {
     if (!data.nodes || data.nodes.length === 0) {
@@ -129,27 +131,58 @@ export const Graph: React.FC<GraphProps> = ({ data, onSelectFile }) => {
       return;
     }
 
-    // Apply layout positions
     const laidOutNodes = layoutNodes(data.nodes, data.edges);
+    setNodes(laidOutNodes.map(n => ({
+      ...n,
+      data: { ...n.data, isHighlighted: false, isSearchActive: false }
+    })));
 
-    const formattedEdges = data.edges.map((e, index) => ({
+    setEdges(data.edges.map((e, index) => ({
       id: `e-${index}`,
       source: e.source,
       target: e.target,
       type: "smoothstep",
       animated: true,
-      style: { stroke: "#4b5563" },
+      style: { stroke: "#4b5563", strokeWidth: 1 },
       markerEnd: {
         type: MarkerType.ArrowClosed,
         color: "#4b5563",
         width: 16,
         height: 16,
       },
+    })));
+  }, [data]);
+
+  useEffect(() => {
+    const isSearchActive = searchQuery.trim() !== "";
+    const query = searchQuery.toLowerCase();
+
+    setNodes(prev => prev.map(node => {
+      const filename = node.data.id.split("/").pop() || node.data.id;
+      const isHighlighted = isSearchActive && filename.toLowerCase().includes(query);
+      return { ...node, data: { ...node.data, isHighlighted, isSearchActive } };
     }));
 
-    setNodes(laidOutNodes);
-    setEdges(formattedEdges);
-  }, [data, setNodes, setEdges]);
+    setEdges(prev => prev.map(edge => {
+      const isSourceMatch = (edge.source.split("/").pop() || edge.source).toLowerCase().includes(query);
+      const isTargetMatch = (edge.target.split("/").pop() || edge.target).toLowerCase().includes(query);
+      const isEdgeHighlighted = isSearchActive && isSourceMatch && isTargetMatch;
+      return {
+        ...edge,
+        animated: !isSearchActive || isEdgeHighlighted,
+        style: {
+          stroke: isSearchActive ? (isEdgeHighlighted ? "#818cf8" : "#1e293b") : "#4b5563",
+          strokeWidth: isEdgeHighlighted ? 2 : 1,
+        },
+        markerEnd: {
+          type: MarkerType.ArrowClosed,
+          color: isSearchActive ? (isEdgeHighlighted ? "#818cf8" : "#1e293b") : "#4b5563",
+          width: 16,
+          height: 16,
+        },
+      };
+    }));
+  }, [searchQuery]);
 
   const onNodeClick = (_event: React.MouseEvent, node: any) => {
     onSelectFile({
@@ -161,6 +194,28 @@ export const Graph: React.FC<GraphProps> = ({ data, onSelectFile }) => {
 
   return (
     <div className="w-full h-full relative">
+      {/* Search / Filter Bar */}
+      <div className="absolute top-4 left-4 z-10 w-72 bg-slate-900/90 border border-slate-800 backdrop-blur-md rounded-xl p-3 shadow-2xl flex flex-col gap-2">
+        <div className="relative flex items-center">
+          <Search className="absolute left-3 h-4 w-4 text-slate-400" />
+          <input
+            type="text"
+            placeholder="Search files by name..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full bg-slate-950/60 border border-slate-800 text-slate-200 pl-9 pr-8 py-2 rounded-lg text-xs focus:outline-none focus:border-indigo-500 transition-all font-sans"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery("")}
+              className="absolute right-2 p-1 rounded-md hover:bg-slate-800 text-slate-400 hover:text-slate-200 transition-colors"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          )}
+        </div>
+      </div>
+
       <ReactFlow
         nodes={nodes}
         edges={edges}

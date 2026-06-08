@@ -17,11 +17,23 @@ export const FileNode = memo(({ data }: any) => {
 
   const filename = data.id.split("/").pop() || data.id;
 
+  const isSearchActive = data.isSearchActive;
+  const isHighlighted = data.isHighlighted;
+
+  let highlightClass = "";
+  if (isSearchActive) {
+    if (isHighlighted) {
+      highlightClass = "ring-2 ring-indigo-400 border-indigo-400 shadow-[0_0_15px_rgba(129,140,248,0.5)] scale-105 z-50";
+    } else {
+      highlightClass = "opacity-25 border-slate-700/40 bg-slate-950/20 text-slate-500 shadow-none";
+    }
+  }
+
   return (
     <div
       className={`px-4 py-3 rounded-xl border backdrop-blur-sm shadow-xl transition-all duration-200 min-w-[150px] text-center select-none ${getLangStyles(
         data.language
-      )}`}
+      )} ${highlightClass}`}
     >
       <Handle
         type="target"
