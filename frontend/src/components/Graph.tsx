@@ -6,10 +6,12 @@ import ReactFlow, {
   useNodesState,
   useEdgesState,
   MarkerType,
+  ReactFlowProvider,
+  useReactFlow,
 } from "reactflow";
 import "reactflow/dist/style.css";
 import { FileNode } from "./FileNode";
-import { Search, X } from "lucide-react";
+import { Search, X, Maximize2 } from "lucide-react";
 
 interface GraphNode {
   id: string;
@@ -117,7 +119,8 @@ const layoutNodes = (nodes: GraphNode[], edges: GraphEdge[]) => {
   });
 };
 
-export const Graph: React.FC<GraphProps> = ({ data, onSelectFile }) => {
+const GraphCanvas: React.FC<GraphProps> = ({ data, onSelectFile }) => {
+  const { fitView } = useReactFlow();
   const nodeTypes = useMemo(() => ({ fileNode: FileNode }), []);
 
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
@@ -214,6 +217,13 @@ export const Graph: React.FC<GraphProps> = ({ data, onSelectFile }) => {
             </button>
           )}
         </div>
+        <button
+          onClick={() => fitView({ duration: 800 })}
+          className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs py-2 px-3 rounded-lg transition-all flex items-center justify-center gap-1.5 shadow-md shadow-indigo-950/50 cursor-pointer"
+        >
+          <Maximize2 className="h-3.5 w-3.5" />
+          Recenter / Fit View
+        </button>
       </div>
 
       <ReactFlow
@@ -242,5 +252,13 @@ export const Graph: React.FC<GraphProps> = ({ data, onSelectFile }) => {
         <Background color="#1e293b" gap={16} size={1} />
       </ReactFlow>
     </div>
+  );
+};
+
+export const Graph: React.FC<GraphProps> = (props) => {
+  return (
+    <ReactFlowProvider>
+      <GraphCanvas {...props} />
+    </ReactFlowProvider>
   );
 };
