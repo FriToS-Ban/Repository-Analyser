@@ -43,8 +43,10 @@ export const FileNode = memo(({ data }: any) => {
       <div className="font-semibold text-xs truncate max-w-[160px] tracking-wide">
         {filename}
       </div>
-      <div className="text-[9px] opacity-75 mt-1 font-mono tracking-wider">
-        {data.loc} LOC
+      <div className="text-[9px] opacity-75 mt-1 font-mono tracking-wider flex items-center justify-center gap-1.5">
+        <span>{data.loc} LOC</span>
+        <span>•</span>
+        <span>{data.incomingEdges || 0} {data.incomingEdges === 1 ? "import" : "imports"}</span>
       </div>
       <Handle
         type="source"

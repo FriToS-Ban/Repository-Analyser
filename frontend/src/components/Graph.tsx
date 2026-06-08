@@ -108,7 +108,7 @@ const layoutNodes = (nodes: GraphNode[], edges: GraphEdge[]) => {
     return {
       id: n.id,
       type: "fileNode",
-      data: { id: n.id, language: n.language, loc: n.loc },
+      data: { id: n.id, language: n.language, loc: n.loc, incomingEdges: inDegree[n.id] || 0 },
       position: {
         x: lvl * HORIZONTAL_SPACING + 150,
         y: yPos + 350,
