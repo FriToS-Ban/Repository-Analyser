@@ -17,7 +17,6 @@ def init_db():
     conn.close()
 
 def get_summary(file_path: str, content_hash: str) -> str | None:
-    init_db()
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute(
@@ -31,7 +30,6 @@ def get_summary(file_path: str, content_hash: str) -> str | None:
     return None
 
 def set_summary(file_path: str, content_hash: str, summary: str):
-    init_db()
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute(
@@ -40,3 +38,5 @@ def set_summary(file_path: str, content_hash: str, summary: str):
     )
     conn.commit()
     conn.close()
+
+init_db()

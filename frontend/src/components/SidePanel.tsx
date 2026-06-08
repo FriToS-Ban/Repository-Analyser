@@ -20,7 +20,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
   summary,
   loading,
 }) => {
-  if (!isOpen || !fileInfo) return null;
+  if (!fileInfo) return null;
 
   const getLangBadgeColor = (lang: string) => {
     switch (lang.toLowerCase()) {
@@ -36,7 +36,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
   };
 
   return (
-    <div className="fixed inset-y-0 right-0 w-96 bg-[#0f172a]/95 backdrop-blur-md border-l border-slate-800 shadow-2xl flex flex-col z-50 transition-all duration-300 transform translate-x-0">
+    <div className={`fixed inset-y-0 right-0 w-96 bg-[#0f172a]/95 backdrop-blur-md border-l border-slate-800 shadow-2xl flex flex-col z-50 transition-transform duration-300 ${isOpen ? 'translate-x-0' : 'translate-x-full'}`}>
       {/* Header */}
       <div className="p-4 border-b border-slate-800 flex items-center justify-between">
         <div className="flex items-center gap-2">

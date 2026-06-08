@@ -91,7 +91,7 @@ function App() {
       const data = await response.json();
       setSummary(data.summary);
     } catch (err: any) {
-      setSummary(null);
+      setSummary("Failed to load summary. Check your backend connection.");
     } finally {
       setLoadingSummary(false);
     }
