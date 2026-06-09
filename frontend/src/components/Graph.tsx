@@ -127,6 +127,25 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, onSelectFile }) => {
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [searchQuery, setSearchQuery] = useState("");
 
+  const nodePositions = useMemo(() => {
+    if (!data.nodes || data.nodes.length === 0) return new Map<string, number>();
+    const laidOut = layoutNodes(data.nodes, data.edges);
+    const map = new Map<string, number>();
+    laidOut.forEach((n) => {
+      map.set(n.id, n.position.x);
+    });
+    return map;
+  }, [data]);
+
+  const getEdgeColor = useMemo(() => (sourceId: string, targetId: string) => {
+    const sourceX = nodePositions.get(sourceId);
+    const targetX = nodePositions.get(targetId);
+    if (sourceX === undefined || targetX === undefined) return "#4b5563";
+    if (sourceX < targetX) return "#3b82f6";
+    if (sourceX > targetX) return "#ef4444";
+    return "#10b981";
+  }, [nodePositions]);
+
   useEffect(() => {
     if (!data.nodes || data.nodes.length === 0) {
       setNodes([]);
@@ -140,20 +159,23 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, onSelectFile }) => {
       data: { ...n.data, isHighlighted: false, isSearchActive: false }
     })));
 
-    setEdges(data.edges.map((e, index) => ({
-      id: `e-${index}`,
-      source: e.source,
-      target: e.target,
-      type: "smoothstep",
-      animated: true,
-      style: { stroke: "#4b5563", strokeWidth: 1 },
-      markerEnd: {
-        type: MarkerType.ArrowClosed,
-        color: "#4b5563",
-        width: 16,
-        height: 16,
-      },
-    })));
+    setEdges(data.edges.map((e, index) => {
+      const color = getEdgeColor(e.source, e.target);
+      return {
+        id: `e-${index}`,
+        source: e.source,
+        target: e.target,
+        type: "smoothstep",
+        animated: true,
+        style: { stroke: color, strokeWidth: 1 },
+        markerEnd: {
+          type: MarkerType.ArrowClosed,
+          color: color,
+          width: 16,
+          height: 16,
+        },
+      };
+    }));
   }, [data]);
 
   useEffect(() => {
@@ -170,16 +192,18 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, onSelectFile }) => {
       const isSourceMatch = (edge.source.split("/").pop() || edge.source).toLowerCase().includes(query);
       const isTargetMatch = (edge.target.split("/").pop() || edge.target).toLowerCase().includes(query);
       const isEdgeHighlighted = isSearchActive && isSourceMatch && isTargetMatch;
+      const defaultColor = getEdgeColor(edge.source, edge.target);
+
       return {
         ...edge,
         animated: !isSearchActive || isEdgeHighlighted,
         style: {
-          stroke: isSearchActive ? (isEdgeHighlighted ? "#818cf8" : "#1e293b") : "#4b5563",
+          stroke: isSearchActive ? (isEdgeHighlighted ? defaultColor : "#1e293b") : defaultColor,
           strokeWidth: isEdgeHighlighted ? 2 : 1,
         },
         markerEnd: {
           type: MarkerType.ArrowClosed,
-          color: isSearchActive ? (isEdgeHighlighted ? "#818cf8" : "#1e293b") : "#4b5563",
+          color: isSearchActive ? (isEdgeHighlighted ? defaultColor : "#1e293b") : defaultColor,
           width: 16,
           height: 16,
         },
@@ -224,6 +248,23 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, onSelectFile }) => {
           <Maximize2 className="h-3.5 w-3.5" />
           Recenter / Fit View
         </button>
+
+        {/* Edge color legend */}
+        <div className="border-t border-slate-800 pt-2 flex flex-col gap-1">
+          <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Edge Legend</span>
+          <div className="flex items-center gap-2">
+            <span className="w-4 h-0.5 bg-blue-500 rounded-full inline-block"></span>
+            <span className="text-[10px] text-slate-400">Forward dependency</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="w-4 h-0.5 bg-red-500 rounded-full inline-block"></span>
+            <span className="text-[10px] text-slate-400">Backward / cyclic</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="w-4 h-0.5 bg-emerald-500 rounded-full inline-block"></span>
+            <span className="text-[10px] text-slate-400">Same level</span>
+          </div>
+        </div>
       </div>
 
       <ReactFlow
