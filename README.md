@@ -7,16 +7,17 @@ An interactive tool that parses a local Git repository, builds a visual dependen
 ```text
 repo-analyser/
 ├── backend/
-│   ├── main.py          # FastAPI app, routing, NIM connection
-│   ├── parser.py        # Python AST & JS/TS regex dependency parser
-│   ├── cache.py         # SQLite caching for file summaries
+│   ├── main.py            # FastAPI app, routing, NIM connection
+│   ├── parser.py          # Python AST & JS/TS regex dependency parser
+│   ├── cache.py           # SQLite caching for file summaries
 │   └── requirements.txt
 ├── frontend/
 │   ├── src/
 │   │   ├── components/
-│   │   │   ├── Graph.tsx       # React Flow container
-│   │   │   ├── FileNode.tsx    # Custom language-styled nodes
-│   │   │   └── SidePanel.tsx   # Detailed info and AI summaries
+│   │   │   ├── Graph.tsx           # React Flow container
+│   │   │   ├── FileNode.tsx        # Custom language-styled nodes
+│   │   │   ├── FolderGroupNode.tsx # Folder-cluster container nodes
+│   │   │   └── SidePanel.tsx       # Detailed info, AI summaries, copy to clipboard
 │   │   ├── App.tsx
 │   │   └── main.tsx
 │   ├── index.html
@@ -65,8 +66,13 @@ Open [http://localhost:5173](http://localhost:5173) in your browser.
 
 ## Features
 
+- **Folder-Based Clustering**: Group files by their parent directories visually into containers. Columns are sorted by average dependency depth, resulting in a cleaner, cluster-based mental model.
+- **Circular Dependency Detection**: Custom iterative Tarjan's Strongly Connected Components (SCC) algorithm detects cyclic loops. Circular dependency edges are highlighted in **Red** with increased stroke thickness.
+- **HD Image Export**: One-click **Export as PNG** functionality using `html-to-image`. Hides controls, minimaps, and overlay panels temporarily during generation for a clean export at `pixelRatio: 2`.
+- **Live Language Filters**: Interactive pills to highlight specific languages (Python, TS, JS, etc.) dynamically, fading out other nodes.
+- **Repository Statistics**: Header dashboard displaying total analyzed files, cumulative lines of code (LOC), and a relative percentage breakdown of the codebase languages.
 - **AST-Based Parsing**: Resolves Python `import` statements natively using Python's `ast` library.
 - **Regex Parsing**: Resolves relative JavaScript and TypeScript (`.js`, `.jsx`, `.ts`, `.tsx`) imports and dynamic requires.
-- **Interactive Visualisation**: Beautiful color-coded node graph indicating file types (Python = Blue, JS = Yellow, TS = Cyan, Other = Grey), lines of code, and relationship lines (smooth-step layout).
-- **AI File Summaries**: One-click AI explanation queries using NVIDIA NIM `meta/llama-3.1-8b-instruct`.
+- **AI File Summaries**: One-click AI explanation queries using NVIDIA NIM `meta/llama-3.1-8b-instruct` with a "Copy Summary" clipboard helper in the side panel.
 - **SQLite Performance Caching**: Fast reload on cached file hashes so that identical files don't cost API credits or cause lag.
+
