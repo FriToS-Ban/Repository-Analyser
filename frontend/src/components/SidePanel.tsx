@@ -1,5 +1,5 @@
-import React from "react";
-import { X, FileCode, Hash, MessageSquare, Terminal } from "lucide-react";
+import React, { useState } from "react";
+import { X, FileCode, Hash, MessageSquare, Terminal, Copy, Check } from "lucide-react";
 
 interface SidePanelProps {
   isOpen: boolean;
@@ -21,6 +21,27 @@ export const SidePanel: React.FC<SidePanelProps> = ({
   loading,
 }) => {
   if (!fileInfo) return null;
+
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    if (!summary) return;
+    try {
+      await navigator.clipboard.writeText(summary);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // fallback for non-secure contexts
+      const ta = document.createElement("textarea");
+      ta.value = summary;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
 
   const getLangBadgeColor = (lang: string) => {
     switch (lang.toLowerCase()) {
@@ -87,9 +108,28 @@ export const SidePanel: React.FC<SidePanelProps> = ({
 
         {/* Summary */}
         <div className="space-y-2 border-t border-slate-800/60 pt-6">
-          <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-            <MessageSquare className="h-4 w-4 text-indigo-400" /> AI-Powered Explanation
-          </h4>
+          <div className="flex items-center justify-between">
+            <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+              <MessageSquare className="h-4 w-4 text-indigo-400" /> AI-Powered Explanation
+            </h4>
+            {summary && !loading && (
+              <button
+                onClick={handleCopy}
+                title={copied ? "Copied!" : "Copy summary"}
+                className={`flex items-center gap-1.5 text-[10px] font-semibold px-2.5 py-1 rounded-lg border transition-all duration-200 cursor-pointer ${
+                  copied
+                    ? "bg-emerald-950/40 text-emerald-400 border-emerald-700/50 shadow-sm shadow-emerald-950/40"
+                    : "bg-slate-800/60 text-slate-400 border-slate-700 hover:bg-slate-700/60 hover:text-slate-200"
+                }`}
+              >
+                {copied ? (
+                  <><Check className="h-3 w-3" /> Copied!</>
+                ) : (
+                  <><Copy className="h-3 w-3" /> Copy</>
+                )}
+              </button>
+            )}
+          </div>
           
           {loading ? (
             <div className="flex flex-col items-center justify-center py-12 space-y-3">
