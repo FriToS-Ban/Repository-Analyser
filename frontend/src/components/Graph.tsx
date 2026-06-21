@@ -1,4 +1,4 @@
-import React, { useMemo, useEffect, useState } from "react";
+import React, { useMemo, useEffect, useState, useRef } from "react";
 import ReactFlow, {
   MiniMap,
   Controls,
@@ -13,6 +13,7 @@ import "reactflow/dist/style.css";
 import { FileNode } from "./FileNode";
 import { FolderGroupNode } from "./FolderGroupNode";
 import { Search, X, Maximize2 } from "lucide-react";
+
 
 interface GraphNode {
   id: string;
@@ -166,6 +167,95 @@ const layoutNodesGrouped = (
   return { rfNodes, absoluteXMap };
 };
 
+// Tarjan's algorithm to find strongly connected components and cyclic edges
+const findCyclicEdges = (nodes: GraphNode[], edges: GraphEdge[]): Set<string> => {
+  const cyclicEdges = new Set<string>();
+  if (nodes.length === 0) return cyclicEdges;
+
+  const adj: Record<string, string[]> = {};
+  nodes.forEach((n) => { adj[n.id] = []; });
+  edges.forEach((e) => {
+    if (adj[e.source] && adj[e.target]) adj[e.source].push(e.target);
+  });
+
+  const indexMap = new Map<string, number>();
+  const lowlinkMap = new Map<string, number>();
+  const onStack = new Set<string>();
+  const stack: string[] = [];
+  let index = 0;
+  const sccs: string[][] = [];
+
+  // Iterative Tarjan using an explicit work stack to avoid recursion limits
+  nodes.forEach((startNode) => {
+    if (indexMap.has(startNode.id)) return;
+
+    const workStack: { v: string; neighborIdx: number }[] = [{ v: startNode.id, neighborIdx: 0 }];
+
+    while (workStack.length > 0) {
+      const frame = workStack[workStack.length - 1];
+      const v = frame.v;
+
+      if (frame.neighborIdx === 0) {
+        indexMap.set(v, index);
+        lowlinkMap.set(v, index);
+        index++;
+        stack.push(v);
+        onStack.add(v);
+      }
+
+      const neighbors = adj[v] || [];
+      if (frame.neighborIdx < neighbors.length) {
+        const w = neighbors[frame.neighborIdx];
+        frame.neighborIdx++;
+
+        if (!indexMap.has(w)) {
+          workStack.push({ v: w, neighborIdx: 0 });
+        } else if (onStack.has(w)) {
+          lowlinkMap.set(v, Math.min(lowlinkMap.get(v)!, indexMap.get(w)!));
+        }
+      } else {
+        workStack.pop();
+        if (workStack.length > 0) {
+          const parent = workStack[workStack.length - 1].v;
+          lowlinkMap.set(parent, Math.min(lowlinkMap.get(parent)!, lowlinkMap.get(v)!));
+        }
+
+        if (lowlinkMap.get(v) === indexMap.get(v)) {
+          const scc: string[] = [];
+          while (true) {
+            const w = stack.pop()!;
+            onStack.delete(w);
+            scc.push(w);
+            if (w === v) break;
+          }
+          sccs.push(scc);
+        }
+      }
+    }
+  });
+
+  const nodeSccMap = new Map<string, number>();
+  sccs.forEach((scc, sccIdx) => {
+    scc.forEach((nodeId) => nodeSccMap.set(nodeId, sccIdx));
+  });
+
+  edges.forEach((e) => {
+    if (e.source === e.target) {
+      cyclicEdges.add(JSON.stringify([e.source, e.target]));
+    } else {
+      const sccIdxSource = nodeSccMap.get(e.source);
+      const sccIdxTarget = nodeSccMap.get(e.target);
+      if (sccIdxSource !== undefined && sccIdxSource === sccIdxTarget) {
+        if (sccs[sccIdxSource].length > 1) {
+          cyclicEdges.add(JSON.stringify([e.source, e.target]));
+        }
+      }
+    }
+  });
+
+  return cyclicEdges;
+};
+
 const GraphCanvas: React.FC<GraphProps> = ({ data, onSelectFile }) => {
   const { fitView, getNode, setCenter } = useReactFlow();
   const nodeTypes = useMemo(() => ({ fileNode: FileNode, folderNode: FolderGroupNode }), []);
@@ -200,9 +290,9 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, onSelectFile }) => {
   }, [data.nodes, langFilter, isLangFilterActive]);
 
   const langMeta: Record<string, { label: string; active: string; inactive: string }> = {
-    python:     { label: "Python",     active: "bg-blue-600 text-white border-blue-500 shadow-blue-500/30",   inactive: "bg-blue-950/40 text-blue-400 border-blue-900/60 hover:bg-blue-900/40" },
+    python: { label: "Python", active: "bg-blue-600 text-white border-blue-500 shadow-blue-500/30", inactive: "bg-blue-950/40 text-blue-400 border-blue-900/60 hover:bg-blue-900/40" },
     javascript: { label: "JavaScript", active: "bg-yellow-500 text-slate-900 border-yellow-400 shadow-yellow-500/30", inactive: "bg-yellow-950/40 text-yellow-400 border-yellow-900/60 hover:bg-yellow-900/40" },
-    typescript: { label: "TypeScript", active: "bg-cyan-600 text-white border-cyan-500 shadow-cyan-500/30",   inactive: "bg-cyan-950/40 text-cyan-400 border-cyan-900/60 hover:bg-cyan-900/40" },
+    typescript: { label: "TypeScript", active: "bg-cyan-600 text-white border-cyan-500 shadow-cyan-500/30", inactive: "bg-cyan-950/40 text-cyan-400 border-cyan-900/60 hover:bg-cyan-900/40" },
   };
 
   const nodePositions = useMemo(() => {
@@ -211,14 +301,21 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, onSelectFile }) => {
     return absoluteXMap;
   }, [data]);
 
+  const cyclicEdges = useMemo(() => {
+    return findCyclicEdges(data.nodes, data.edges);
+  }, [data.nodes, data.edges]);
+
   const getEdgeColor = useMemo(() => (sourceId: string, targetId: string) => {
+    if (cyclicEdges.has(JSON.stringify([sourceId, targetId]))) {
+      return "#ef4444"; // Red for circular dependency
+    }
     const sourceX = nodePositions.get(sourceId);
     const targetX = nodePositions.get(targetId);
     if (sourceX === undefined || targetX === undefined) return "#4b5563";
-    if (sourceX < targetX) return "#3b82f6";
-    if (sourceX > targetX) return "#ef4444";
-    return "#10b981";
-  }, [nodePositions]);
+    if (sourceX < targetX) return "#3b82f6"; // Blue for forward dependency
+    if (sourceX > targetX) return "#64748b"; // Slate for non-cyclic backward edges
+    return "#10b981"; // Emerald/green for same level
+  }, [nodePositions, cyclicEdges]);
 
   useEffect(() => {
     if (!data.nodes || data.nodes.length === 0) {
@@ -226,8 +323,6 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, onSelectFile }) => {
       setEdges([]);
       return;
     }
-
-    setLangFilter(new Set()); // reset language filter on new graph data
 
     const { rfNodes } = layoutNodesGrouped(data.nodes, data.edges);
     setNodes(rfNodes);
@@ -240,7 +335,7 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, onSelectFile }) => {
         target: e.target,
         type: "smoothstep",
         animated: true,
-        style: { stroke: color, strokeWidth: 1 },
+        style: { stroke: color, strokeWidth: color === "#ef4444" ? 2 : 1 },
         markerEnd: {
           type: MarkerType.ArrowClosed,
           color,
@@ -250,6 +345,16 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, onSelectFile }) => {
       };
     }));
   }, [data, getEdgeColor]);
+
+  const prevDataRef = useRef(data);
+
+  useEffect(() => {
+    if (prevDataRef.current !== data) {
+      setLangFilter(new Set());
+      setSearchQuery("");
+      prevDataRef.current = data;
+    }
+  }, [data]);
 
   useEffect(() => {
     const isSearchActive = searchQuery.trim() !== "";
@@ -281,7 +386,7 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, onSelectFile }) => {
         animated: !combinedActive || isEdgeHighlighted,
         style: {
           stroke: combinedActive ? (isEdgeHighlighted ? defaultColor : "#1e293b") : defaultColor,
-          strokeWidth: isEdgeHighlighted ? 2 : 1,
+          strokeWidth: isEdgeHighlighted ? 2.5 : (defaultColor === "#ef4444" ? 2 : 1),
         },
         markerEnd: {
           type: MarkerType.ArrowClosed,
@@ -397,11 +502,10 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, onSelectFile }) => {
               <div className="flex flex-wrap gap-1.5">
                 <button
                   onClick={() => setLangFilter(new Set())}
-                  className={`text-[10px] font-semibold px-2.5 py-1 rounded-full border transition-all shadow-sm cursor-pointer ${
-                    !isLangFilterActive
-                      ? "bg-indigo-600 text-white border-indigo-500 shadow-indigo-500/30"
-                      : "bg-slate-800/60 text-slate-400 border-slate-700 hover:bg-slate-700/60"
-                  }`}
+                  className={`text-[10px] font-semibold px-2.5 py-1 rounded-full border transition-all shadow-sm cursor-pointer ${!isLangFilterActive
+                    ? "bg-indigo-600 text-white border-indigo-500 shadow-indigo-500/30"
+                    : "bg-slate-800/60 text-slate-400 border-slate-700 hover:bg-slate-700/60"
+                    }`}
                 >
                   All
                 </button>
@@ -412,9 +516,8 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, onSelectFile }) => {
                     <button
                       key={lang}
                       onClick={() => toggleLang(lang)}
-                      className={`text-[10px] font-semibold px-2.5 py-1 rounded-full border transition-all shadow-sm cursor-pointer ${
-                        isActive ? meta.active : meta.inactive
-                      }`}
+                      className={`text-[10px] font-semibold px-2.5 py-1 rounded-full border transition-all shadow-sm cursor-pointer ${isActive ? meta.active : meta.inactive
+                        }`}
                     >
                       {meta.label}
                     </button>
@@ -472,8 +575,12 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, onSelectFile }) => {
               <span className="text-[10px] text-slate-400">Forward dependency</span>
             </div>
             <div className="flex items-center gap-2">
+              <span className="w-4 h-0.5 bg-slate-500 rounded-full inline-block"></span>
+              <span className="text-[10px] text-slate-400">Backward (non-cyclic)</span>
+            </div>
+            <div className="flex items-center gap-2">
               <span className="w-4 h-0.5 bg-red-500 rounded-full inline-block"></span>
-              <span className="text-[10px] text-slate-400">Backward / cyclic</span>
+              <span className="text-[10px] text-slate-400">Circular dependency</span>
             </div>
             <div className="flex items-center gap-2">
               <span className="w-4 h-0.5 bg-emerald-500 rounded-full inline-block"></span>
