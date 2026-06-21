@@ -126,6 +126,37 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, onSelectFile }) => {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [searchQuery, setSearchQuery] = useState("");
+  const [langFilter, setLangFilter] = useState<Set<string>>(new Set());
+
+  // Derive unique languages present in this graph
+  const availableLangs = useMemo(() => {
+    const langs = new Set<string>();
+    data.nodes.forEach((n) => langs.add(n.language.toLowerCase()));
+    return Array.from(langs).sort();
+  }, [data.nodes]);
+
+  const toggleLang = (lang: string) => {
+    setLangFilter((prev) => {
+      const next = new Set(prev);
+      if (next.has(lang)) next.delete(lang);
+      else next.add(lang);
+      return next;
+    });
+  };
+
+  const isLangFilterActive = langFilter.size > 0;
+
+  // Filtered node IDs for the current language selection
+  const filteredNodeIds = useMemo(() => {
+    if (!isLangFilterActive) return null;
+    return new Set(data.nodes.filter((n) => langFilter.has(n.language.toLowerCase())).map((n) => n.id));
+  }, [data.nodes, langFilter, isLangFilterActive]);
+
+  const langMeta: Record<string, { label: string; active: string; inactive: string }> = {
+    python:     { label: "Python",     active: "bg-blue-600 text-white border-blue-500 shadow-blue-500/30",   inactive: "bg-blue-950/40 text-blue-400 border-blue-900/60 hover:bg-blue-900/40" },
+    javascript: { label: "JavaScript", active: "bg-yellow-500 text-slate-900 border-yellow-400 shadow-yellow-500/30", inactive: "bg-yellow-950/40 text-yellow-400 border-yellow-900/60 hover:bg-yellow-900/40" },
+    typescript: { label: "TypeScript", active: "bg-cyan-600 text-white border-cyan-500 shadow-cyan-500/30",   inactive: "bg-cyan-950/40 text-cyan-400 border-cyan-900/60 hover:bg-cyan-900/40" },
+  };
 
   const nodePositions = useMemo(() => {
     if (!data.nodes || data.nodes.length === 0) return new Map<string, number>();
@@ -184,32 +215,40 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, onSelectFile }) => {
 
     setNodes(prev => prev.map(node => {
       const filename = node.data.id.split("/").pop() || node.data.id;
-      const isHighlighted = isSearchActive && filename.toLowerCase().includes(query);
-      return { ...node, data: { ...node.data, isHighlighted, isSearchActive } };
+      const passesSearch = !isSearchActive || filename.toLowerCase().includes(query);
+      const passesLang = !isLangFilterActive || langFilter.has(node.data.language?.toLowerCase());
+      const combinedActive = isSearchActive || isLangFilterActive;
+      const isHighlighted = combinedActive && passesSearch && passesLang;
+      return { ...node, data: { ...node.data, isHighlighted, isSearchActive: combinedActive } };
     }));
 
     setEdges(prev => prev.map(edge => {
       const isSourceMatch = (edge.source.split("/").pop() || edge.source).toLowerCase().includes(query);
       const isTargetMatch = (edge.target.split("/").pop() || edge.target).toLowerCase().includes(query);
-      const isEdgeHighlighted = isSearchActive && isSourceMatch && isTargetMatch;
+      const passesLangSource = !isLangFilterActive || (filteredNodeIds?.has(edge.source) ?? true);
+      const passesLangTarget = !isLangFilterActive || (filteredNodeIds?.has(edge.target) ?? true);
+      const combinedActive = isSearchActive || isLangFilterActive;
+      const isEdgeHighlighted = combinedActive &&
+        (!isSearchActive || (isSourceMatch && isTargetMatch)) &&
+        passesLangSource && passesLangTarget;
       const defaultColor = getEdgeColor(edge.source, edge.target);
 
       return {
         ...edge,
-        animated: !isSearchActive || isEdgeHighlighted,
+        animated: !combinedActive || isEdgeHighlighted,
         style: {
-          stroke: isSearchActive ? (isEdgeHighlighted ? defaultColor : "#1e293b") : defaultColor,
+          stroke: combinedActive ? (isEdgeHighlighted ? defaultColor : "#1e293b") : defaultColor,
           strokeWidth: isEdgeHighlighted ? 2 : 1,
         },
         markerEnd: {
           type: MarkerType.ArrowClosed,
-          color: isSearchActive ? (isEdgeHighlighted ? defaultColor : "#1e293b") : defaultColor,
+          color: combinedActive ? (isEdgeHighlighted ? defaultColor : "#1e293b") : defaultColor,
           width: 16,
           height: 16,
         },
       };
     }));
-  }, [searchQuery, getEdgeColor]);
+  }, [searchQuery, langFilter, isLangFilterActive, filteredNodeIds, getEdgeColor]);
 
   const onNodeClick = (_event: React.MouseEvent, node: any) => {
     onSelectFile({
@@ -233,7 +272,7 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, onSelectFile }) => {
           </span>
         </div>
         <div className="flex-1 overflow-y-auto p-2 space-y-1">
-          {data.nodes.map((node) => {
+          {data.nodes.filter((node) => !isLangFilterActive || langFilter.has(node.language.toLowerCase())).map((node) => {
             const filename = node.id.split("/").pop() || node.id;
             const dir = node.id.split("/").slice(0, -1).join("/");
             const lang = node.language.toLowerCase();
@@ -300,6 +339,40 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, onSelectFile }) => {
       <div className="flex-1 h-full relative">
         {/* Search / Filter Bar */}
         <div className="absolute top-4 left-4 z-10 w-72 bg-slate-900/90 border border-slate-800 backdrop-blur-md rounded-xl p-3 shadow-2xl flex flex-col gap-2">
+          {/* Language Filter Pills */}
+          {availableLangs.length > 1 && (
+            <div className="flex flex-col gap-1.5">
+              <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Language</span>
+              <div className="flex flex-wrap gap-1.5">
+                <button
+                  onClick={() => setLangFilter(new Set())}
+                  className={`text-[10px] font-semibold px-2.5 py-1 rounded-full border transition-all shadow-sm cursor-pointer ${
+                    !isLangFilterActive
+                      ? "bg-indigo-600 text-white border-indigo-500 shadow-indigo-500/30"
+                      : "bg-slate-800/60 text-slate-400 border-slate-700 hover:bg-slate-700/60"
+                  }`}
+                >
+                  All
+                </button>
+                {availableLangs.map((lang) => {
+                  const meta = langMeta[lang] || { label: lang.charAt(0).toUpperCase() + lang.slice(1), active: "bg-indigo-600 text-white border-indigo-500 shadow-indigo-500/30", inactive: "bg-slate-800/60 text-slate-400 border-slate-700 hover:bg-slate-700/60" };
+                  const isActive = langFilter.has(lang);
+                  return (
+                    <button
+                      key={lang}
+                      onClick={() => toggleLang(lang)}
+                      className={`text-[10px] font-semibold px-2.5 py-1 rounded-full border transition-all shadow-sm cursor-pointer ${
+                        isActive ? meta.active : meta.inactive
+                      }`}
+                    >
+                      {meta.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           <div className="relative flex items-center">
             <Search className="absolute left-3 h-4 w-4 text-slate-400" />
             <input
@@ -331,6 +404,7 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, onSelectFile }) => {
                 }))
               );
               setSearchQuery("");
+              setLangFilter(new Set());
               fitView({ duration: 800 });
             }}
             className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs py-2 px-3 rounded-lg transition-all flex items-center justify-center gap-1.5 shadow-md shadow-indigo-950/50 cursor-pointer"
