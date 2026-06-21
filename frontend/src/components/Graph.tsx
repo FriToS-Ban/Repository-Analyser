@@ -11,6 +11,7 @@ import ReactFlow, {
 } from "reactflow";
 import "reactflow/dist/style.css";
 import { FileNode } from "./FileNode";
+import { FolderGroupNode } from "./FolderGroupNode";
 import { Search, X, Maximize2 } from "lucide-react";
 
 interface GraphNode {
@@ -32,96 +33,142 @@ interface GraphProps {
   onSelectFile: (file: { path: string; language: string; loc: number }) => void;
 }
 
-// Simple BFS layered layout algorithm to compute X and Y coordinates dynamically
-const layoutNodes = (nodes: GraphNode[], edges: GraphEdge[]) => {
+// Layout constants
+const NODE_W = 200;
+const NODE_H = 72;
+const F_PADDING = 14;
+const F_HEADER_H = 38;
+const FILE_GAP = 10;
+const FOLDER_COL_GAP = 310;
+const FOLDER_ROW_GAP = 30;
+const FOLDER_W = NODE_W + F_PADDING * 2;
+const folderHeight = (count: number) =>
+  F_HEADER_H + F_PADDING + count * NODE_H + Math.max(count - 1, 0) * FILE_GAP + F_PADDING;
+
+// Cluster-by-folder layout: groups files into parent folder nodes,
+// positions folder columns by average BFS level of their children.
+const layoutNodesGrouped = (
+  nodes: GraphNode[],
+  edges: GraphEdge[]
+): { rfNodes: any[]; absoluteXMap: Map<string, number> } => {
+  if (nodes.length === 0) return { rfNodes: [], absoluteXMap: new Map() };
+
+  // 1. Group files by directory
+  const folderGroups: Record<string, GraphNode[]> = {};
+  nodes.forEach((n) => {
+    const parts = n.id.split("/");
+    const dir = parts.length > 1 ? parts.slice(0, -1).join("/") : "__root__";
+    if (!folderGroups[dir]) folderGroups[dir] = [];
+    folderGroups[dir].push(n);
+  });
+
+  // 2. BFS to compute per-file dependency levels
   const adj: Record<string, string[]> = {};
   const inDegree: Record<string, number> = {};
-
-  nodes.forEach((n) => {
-    adj[n.id] = [];
-    inDegree[n.id] = 0;
-  });
-
+  nodes.forEach((n) => { adj[n.id] = []; inDegree[n.id] = 0; });
   edges.forEach((e) => {
-    if (adj[e.source]) {
-      adj[e.source].push(e.target);
-    }
-    if (inDegree[e.target] !== undefined) {
-      inDegree[e.target]++;
-    }
+    if (adj[e.source]) adj[e.source].push(e.target);
+    if (inDegree[e.target] !== undefined) inDegree[e.target]++;
   });
-
-  const queue: string[] = [];
+  const q: string[] = [];
   const levels: Record<string, number> = {};
-
-  nodes.forEach((n) => {
-    if (inDegree[n.id] === 0) {
-      queue.push(n.id);
-      levels[n.id] = 0;
-    }
-  });
-
-  if (queue.length === 0 && nodes.length > 0) {
-    queue.push(nodes[0].id);
-    levels[nodes[0].id] = 0;
-  }
-
-  while (queue.length > 0) {
-    const current = queue.shift()!;
-    const currentLevel = levels[current] || 0;
-
-    const targets = adj[current] || [];
-    targets.forEach((target) => {
-      if (levels[target] === undefined || levels[target] < currentLevel + 1) {
-        levels[target] = currentLevel + 1;
-        queue.push(target);
+  nodes.forEach((n) => { if (inDegree[n.id] === 0) { q.push(n.id); levels[n.id] = 0; } });
+  if (q.length === 0 && nodes.length > 0) { q.push(nodes[0].id); levels[nodes[0].id] = 0; }
+  while (q.length > 0) {
+    const cur = q.shift()!;
+    (adj[cur] || []).forEach((t) => {
+      if (levels[t] === undefined || levels[t] < (levels[cur] || 0) + 1) {
+        levels[t] = (levels[cur] || 0) + 1;
+        q.push(t);
       }
     });
   }
+  nodes.forEach((n) => { if (levels[n.id] === undefined) levels[n.id] = 0; });
 
-  // Ensure all nodes have levels
-  nodes.forEach((n) => {
-    if (levels[n.id] === undefined) {
-      levels[n.id] = 0;
-    }
+  // 3. Average BFS level per folder → determines horizontal column
+  const folderAvgLevel: Record<string, number> = {};
+  Object.entries(folderGroups).forEach(([dir, fnodes]) => {
+    folderAvgLevel[dir] = Math.round(
+      fnodes.reduce((s, n) => s + (levels[n.id] || 0), 0) / fnodes.length
+    );
   });
 
-  const nodesByLevel: Record<number, GraphNode[]> = {};
-  nodes.forEach((n) => {
-    const lvl = levels[n.id];
-    if (!nodesByLevel[lvl]) {
-      nodesByLevel[lvl] = [];
-    }
-    nodesByLevel[lvl].push(n);
+  // 4. Group folders by column level
+  const foldersByLevel: Record<number, string[]> = {};
+  Object.keys(folderGroups).forEach((dir) => {
+    const lvl = folderAvgLevel[dir];
+    if (!foldersByLevel[lvl]) foldersByLevel[lvl] = [];
+    foldersByLevel[lvl].push(dir);
   });
 
-  const HORIZONTAL_SPACING = 280;
-  const VERTICAL_SPACING = 110;
+  // 5. Compute folder positions (stack vertically within each column)
+  const CANVAS_CENTER_Y = 450;
+  const folderPos: Record<string, { x: number; y: number }> = {};
+  Object.entries(foldersByLevel).forEach(([lvlStr, dirs]) => {
+    const lvl = parseInt(lvlStr);
+    const x = lvl * FOLDER_COL_GAP + 60;
+    const totalH =
+      dirs.reduce((s, d) => s + folderHeight(folderGroups[d].length), 0) +
+      Math.max(dirs.length - 1, 0) * FOLDER_ROW_GAP;
+    let y = CANVAS_CENTER_Y - totalH / 2;
+    dirs.forEach((dir) => {
+      folderPos[dir] = { x, y };
+      y += folderHeight(folderGroups[dir].length) + FOLDER_ROW_GAP;
+    });
+  });
 
-  return nodes.map((n) => {
-    const lvl = levels[n.id];
-    const levelNodes = nodesByLevel[lvl];
-    const idx = levelNodes.indexOf(n);
+  // 6. Build ReactFlow nodes (folder parents + file children)
+  const rfNodes: any[] = [];
+  const absoluteXMap = new Map<string, number>();
 
-    // Center vertical alignment
-    const totalHeight = (levelNodes.length - 1) * VERTICAL_SPACING;
-    const yPos = idx * VERTICAL_SPACING - totalHeight / 2;
+  Object.entries(folderGroups).forEach(([dir, fnodes]) => {
+    const { x, y } = folderPos[dir] || { x: 0, y: 0 };
+    const height = folderHeight(fnodes.length);
 
-    return {
-      id: n.id,
-      type: "fileNode",
-      data: { id: n.id, language: n.language, loc: n.loc, incomingEdges: inDegree[n.id] || 0 },
-      position: {
-        x: lvl * HORIZONTAL_SPACING + 150,
-        y: yPos + 350,
+    // Folder container node
+    rfNodes.push({
+      id: `folder:${dir}`,
+      type: "folderNode",
+      position: { x, y },
+      data: {
+        label: dir === "__root__" ? "/" : (dir.split("/").pop() || dir),
+        fullPath: dir,
+        count: fnodes.length,
+        isFolder: true,
       },
-    };
+      style: { width: FOLDER_W, height },
+      selectable: true,
+      draggable: true,
+    });
+
+    // File nodes positioned relative to their parent folder
+    fnodes.forEach((n, idx) => {
+      const fileX = F_PADDING;
+      const fileY = F_HEADER_H + F_PADDING + idx * (NODE_H + FILE_GAP);
+      absoluteXMap.set(n.id, x + fileX);
+      rfNodes.push({
+        id: n.id,
+        type: "fileNode",
+        parentId: `folder:${dir}`,
+        position: { x: fileX, y: fileY },
+        data: {
+          id: n.id,
+          language: n.language,
+          loc: n.loc,
+          incomingEdges: inDegree[n.id] || 0,
+          isHighlighted: false,
+          isSearchActive: false,
+        },
+      });
+    });
   });
+
+  return { rfNodes, absoluteXMap };
 };
 
 const GraphCanvas: React.FC<GraphProps> = ({ data, onSelectFile }) => {
   const { fitView, getNode, setCenter } = useReactFlow();
-  const nodeTypes = useMemo(() => ({ fileNode: FileNode }), []);
+  const nodeTypes = useMemo(() => ({ fileNode: FileNode, folderNode: FolderGroupNode }), []);
 
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
@@ -160,12 +207,8 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, onSelectFile }) => {
 
   const nodePositions = useMemo(() => {
     if (!data.nodes || data.nodes.length === 0) return new Map<string, number>();
-    const laidOut = layoutNodes(data.nodes, data.edges);
-    const map = new Map<string, number>();
-    laidOut.forEach((n) => {
-      map.set(n.id, n.position.x);
-    });
-    return map;
+    const { absoluteXMap } = layoutNodesGrouped(data.nodes, data.edges);
+    return absoluteXMap;
   }, [data]);
 
   const getEdgeColor = useMemo(() => (sourceId: string, targetId: string) => {
@@ -184,11 +227,10 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, onSelectFile }) => {
       return;
     }
 
-    const laidOutNodes = layoutNodes(data.nodes, data.edges);
-    setNodes(laidOutNodes.map(n => ({
-      ...n,
-      data: { ...n.data, isHighlighted: false, isSearchActive: false }
-    })));
+    setLangFilter(new Set()); // reset language filter on new graph data
+
+    const { rfNodes } = layoutNodesGrouped(data.nodes, data.edges);
+    setNodes(rfNodes);
 
     setEdges(data.edges.map((e, index) => {
       const color = getEdgeColor(e.source, e.target);
@@ -201,7 +243,7 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, onSelectFile }) => {
         style: { stroke: color, strokeWidth: 1 },
         markerEnd: {
           type: MarkerType.ArrowClosed,
-          color: color,
+          color,
           width: 16,
           height: 16,
         },
@@ -214,6 +256,7 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, onSelectFile }) => {
     const query = searchQuery.toLowerCase();
 
     setNodes(prev => prev.map(node => {
+      if (node.data.isFolder) return node; // folder container nodes are never dimmed
       const filename = node.data.id.split("/").pop() || node.data.id;
       const passesSearch = !isSearchActive || filename.toLowerCase().includes(query);
       const passesLang = !isLangFilterActive || langFilter.has(node.data.language?.toLowerCase());
@@ -251,6 +294,7 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, onSelectFile }) => {
   }, [searchQuery, langFilter, isLangFilterActive, filteredNodeIds, getEdgeColor]);
 
   const onNodeClick = (_event: React.MouseEvent, node: any) => {
+    if (node.data.isFolder) return; // clicking the folder container does nothing
     onSelectFile({
       path: node.data.id,
       language: node.data.language,
@@ -288,7 +332,14 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, onSelectFile }) => {
                   setSearchQuery("");
                   const rfn = getNode(node.id);
                   if (rfn) {
-                    setCenter(rfn.position.x + 75, rfn.position.y + 25, {
+                    // File nodes use relative coords inside parent folder — resolve to absolute
+                    let cx = rfn.position.x + NODE_W / 2;
+                    let cy = rfn.position.y + NODE_H / 2;
+                    if (rfn.parentId) {
+                      const parentRfn = getNode(rfn.parentId);
+                      if (parentRfn) { cx += parentRfn.position.x; cy += parentRfn.position.y; }
+                    }
+                    setCenter(cx, cy, {
                       zoom: 1.2,
                       duration: 800,
                     });
@@ -445,6 +496,7 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, onSelectFile }) => {
           <Controls className="bg-slate-900 border border-slate-800 text-slate-100 rounded-lg p-1" />
           <MiniMap
             nodeColor={(node) => {
+              if (node.data?.isFolder) return "rgba(30,41,59,0.6)";
               const lang = node.data?.language?.toLowerCase() || "";
               if (lang === "python") return "#2563eb";
               if (lang === "javascript") return "#ca8a04";
