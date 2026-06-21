@@ -12,7 +12,8 @@ import ReactFlow, {
 import "reactflow/dist/style.css";
 import { FileNode } from "./FileNode";
 import { FolderGroupNode } from "./FolderGroupNode";
-import { Search, X, Maximize2 } from "lucide-react";
+import { Search, X, Maximize2, Download } from "lucide-react";
+import { toPng } from "html-to-image";
 
 
 interface GraphNode {
@@ -264,6 +265,45 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, onSelectFile }) => {
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [langFilter, setLangFilter] = useState<Set<string>>(new Set());
+  const [exporting, setExporting] = useState(false);
+
+  const reactFlowWrapperRef = useRef<HTMLDivElement>(null);
+
+  const handleExportPng = () => {
+    const el = reactFlowWrapperRef.current?.querySelector(".react-flow") as HTMLElement;
+    if (!el) return;
+
+    setExporting(true);
+
+    const controls = reactFlowWrapperRef.current?.querySelector(".react-flow__controls") as HTMLElement;
+    const minimap = reactFlowWrapperRef.current?.querySelector(".react-flow__minimap") as HTMLElement;
+    const attribution = reactFlowWrapperRef.current?.querySelector(".react-flow__attribution") as HTMLElement;
+
+    if (controls) controls.style.display = "none";
+    if (minimap) minimap.style.display = "none";
+    if (attribution) attribution.style.display = "none";
+
+    toPng(el, {
+      backgroundColor: "#070b13",
+      pixelRatio: 2,
+      cacheBust: true,
+    })
+      .then((dataUrl) => {
+        const a = document.createElement("a");
+        a.setAttribute("download", `repository-graph-${Date.now()}.png`);
+        a.setAttribute("href", dataUrl);
+        a.click();
+      })
+      .catch((err) => {
+        console.error("Failed to export graph as PNG:", err);
+      })
+      .finally(() => {
+        if (controls) controls.style.display = "flex";
+        if (minimap) minimap.style.display = "block";
+        if (attribution) attribution.style.display = "block";
+        setExporting(false);
+      });
+  };
 
   // Derive unique languages present in this graph
   const availableLangs = useMemo(() => {
@@ -492,7 +532,7 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, onSelectFile }) => {
       </div>
 
       {/* Main Canvas Area */}
-      <div className="flex-1 h-full relative">
+      <div className="flex-1 h-full relative" ref={reactFlowWrapperRef}>
         {/* Search / Filter Bar */}
         <div className="absolute top-4 left-4 z-10 w-72 bg-slate-900/90 border border-slate-800 backdrop-blur-md rounded-xl p-3 shadow-2xl flex flex-col gap-2">
           {/* Language Filter Pills */}
@@ -565,6 +605,19 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, onSelectFile }) => {
           >
             <Maximize2 className="h-3.5 w-3.5" />
             Recenter / Fit View
+          </button>
+
+          <button
+            onClick={handleExportPng}
+            disabled={exporting}
+            className="w-full bg-slate-800 hover:bg-slate-700 disabled:bg-slate-900 text-slate-200 font-semibold text-xs py-2 px-3 rounded-lg transition-all flex items-center justify-center gap-1.5 shadow-md border border-slate-700 cursor-pointer disabled:opacity-50"
+          >
+            {exporting ? (
+              <div className="h-3.5 w-3.5 border-2 border-slate-400 border-t-transparent rounded-full animate-spin"></div>
+            ) : (
+              <Download className="h-3.5 w-3.5" />
+            )}
+            {exporting ? "Exporting..." : "Export as PNG"}
           </button>
 
           {/* Edge color legend */}
