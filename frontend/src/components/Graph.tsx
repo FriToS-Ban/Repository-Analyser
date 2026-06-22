@@ -402,6 +402,15 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, selectedFile, onSelectFile })
     return findCyclicEdges(data.nodes, data.edges);
   }, [data.nodes, data.edges]);
 
+  const incomingEdgeCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    data.nodes.forEach((n) => { counts[n.id] = 0; });
+    data.edges.forEach((e) => {
+      if (counts[e.target] !== undefined) counts[e.target]++;
+    });
+    return counts;
+  }, [data.nodes, data.edges]);
+
   const orphanNodeIds = useMemo(() => {
     const orphans = new Set<string>();
     const hasOutgoing = new Set<string>();
@@ -556,63 +565,72 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, selectedFile, onSelectFile })
           </span>
         </div>
         <div className="flex-1 overflow-y-auto p-2 space-y-1">
-          {data.nodes.filter((node) => !isLangFilterActive || langFilter.has(node.language.toLowerCase())).map((node) => {
-            const filename = node.id.split("/").pop() || node.id;
-            const dir = node.id.split("/").slice(0, -1).join("/");
-            const lang = node.language.toLowerCase();
-            let langColor = "bg-slate-800 text-slate-400 border-slate-700";
-            if (lang === "python") langColor = "bg-blue-950/50 text-blue-400 border-blue-900/50";
-            else if (lang === "javascript") langColor = "bg-yellow-950/50 text-yellow-400 border-yellow-900/50";
-            else if (lang === "typescript") langColor = "bg-cyan-950/50 text-cyan-400 border-cyan-900/50";
+          {data.nodes
+            .filter((node) => !isLangFilterActive || langFilter.has(node.language.toLowerCase()))
+            .slice()
+            .sort((a, b) => (incomingEdgeCounts[b.id] || 0) - (incomingEdgeCounts[a.id] || 0))
+            .map((node) => {
+              const filename = node.id.split("/").pop() || node.id;
+              const dir = node.id.split("/").slice(0, -1).join("/");
+              const lang = node.language.toLowerCase();
+              let langColor = "bg-slate-800 text-slate-400 border-slate-700";
+              if (lang === "python") langColor = "bg-blue-950/50 text-blue-400 border-blue-900/50";
+              else if (lang === "javascript") langColor = "bg-yellow-950/50 text-yellow-400 border-yellow-900/50";
+              else if (lang === "typescript") langColor = "bg-cyan-950/50 text-cyan-400 border-cyan-900/50";
 
-            return (
-              <button
-                key={node.id}
-                onClick={() => {
-                  setSearchQuery("");
-                  const rfn = getNode(node.id);
-                  if (rfn) {
-                    // File nodes use relative coords inside parent folder — resolve to absolute
-                    let cx = rfn.position.x + NODE_W / 2;
-                    let cy = rfn.position.y + NODE_H / 2;
-                    if (rfn.parentId) {
-                      const parentRfn = getNode(rfn.parentId);
-                      if (parentRfn) { cx += parentRfn.position.x; cy += parentRfn.position.y; }
+              return (
+                <button
+                  key={node.id}
+                  onClick={() => {
+                    setSearchQuery("");
+                    const rfn = getNode(node.id);
+                    if (rfn) {
+                      // File nodes use relative coords inside parent folder — resolve to absolute
+                      let cx = rfn.position.x + NODE_W / 2;
+                      let cy = rfn.position.y + NODE_H / 2;
+                      if (rfn.parentId) {
+                        const parentRfn = getNode(rfn.parentId);
+                        if (parentRfn) { cx += parentRfn.position.x; cy += parentRfn.position.y; }
+                      }
+                      setCenter(cx, cy, {
+                        zoom: 1.2,
+                        duration: 800,
+                      });
+                      onSelectFile({
+                        path: node.id,
+                        language: node.language,
+                        loc: node.loc,
+                      });
                     }
-                    setCenter(cx, cy, {
-                      zoom: 1.2,
-                      duration: 800,
-                    });
-                    onSelectFile({
-                      path: node.id,
-                      language: node.language,
-                      loc: node.loc,
-                    });
-                  }
-                }}
-                className="w-full text-left p-2.5 rounded-lg border border-transparent hover:border-slate-800 hover:bg-slate-900/50 transition-all group flex items-start justify-between cursor-pointer"
-              >
-                <div className="flex-1 min-w-0 pr-2">
-                  <div className="text-xs font-medium text-slate-300 group-hover:text-white truncate">
-                    {filename}
-                  </div>
-                  {dir && (
-                    <div className="text-[10px] text-slate-500 truncate font-mono mt-0.5">
-                      {dir}
+                  }}
+                  className="w-full text-left p-2.5 rounded-lg border border-transparent hover:border-slate-800 hover:bg-slate-900/50 transition-all group flex items-start justify-between cursor-pointer"
+                >
+                  <div className="flex-1 min-w-0 pr-2">
+                    <div className="text-xs font-medium text-slate-300 group-hover:text-white truncate">
+                      {filename}
                     </div>
-                  )}
-                </div>
-                <div className="flex items-center gap-1.5 shrink-0">
-                  <span className={`text-[9px] px-1.5 py-0.5 rounded border ${langColor} uppercase font-semibold tracking-wider`}>
-                    {node.language}
-                  </span>
-                  <span className="text-[10px] text-slate-500 font-mono">
-                    {node.loc} LOC
-                  </span>
-                </div>
-              </button>
-            );
-          })}
+                    {dir && (
+                      <div className="text-[10px] text-slate-500 truncate font-mono mt-0.5">
+                        {dir}
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <span className={`text-[9px] px-1.5 py-0.5 rounded border ${langColor} uppercase font-semibold tracking-wider`}>
+                      {node.language}
+                    </span>
+                    <span className="text-[10px] text-slate-500 font-mono">
+                      {node.loc} LOC
+                    </span>
+                    {incomingEdgeCounts[node.id] > 0 && (
+                      <span className="text-[9px] text-indigo-400 font-mono font-semibold">
+                        ×{incomingEdgeCounts[node.id]}
+                      </span>
+                    )}
+                  </div>
+                </button>
+              );
+            })}
         </div>
       </div>
 
