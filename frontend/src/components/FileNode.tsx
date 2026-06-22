@@ -19,11 +19,14 @@ export const FileNode = memo(({ data }: any) => {
 
   const isSearchActive = data.isSearchActive;
   const isHighlighted = data.isHighlighted;
+  const isSelected = data.isSelected;
 
   let highlightClass = "";
   if (isSearchActive) {
-    if (isHighlighted) {
-      highlightClass = "ring-2 ring-indigo-400 border-indigo-400 shadow-[0_0_15px_rgba(129,140,248,0.5)] scale-105 z-50";
+    if (isSelected) {
+      highlightClass = "ring-2 ring-emerald-400 border-emerald-400 shadow-[0_0_20px_rgba(52,211,153,0.6)] scale-110 z-50";
+    } else if (isHighlighted) {
+      highlightClass = "ring-2 ring-indigo-400 border-indigo-400 shadow-[0_0_15px_rgba(129,140,248,0.5)] scale-105 z-40";
     } else {
       highlightClass = "opacity-25 border-slate-700/40 bg-slate-950/20 text-slate-500 shadow-none";
     }

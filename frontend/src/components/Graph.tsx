@@ -32,7 +32,8 @@ interface GraphProps {
     nodes: GraphNode[];
     edges: GraphEdge[];
   };
-  onSelectFile: (file: { path: string; language: string; loc: number }) => void;
+  selectedFile: { path: string; language: string; loc: number } | null;
+  onSelectFile: (file: { path: string; language: string; loc: number } | null) => void;
 }
 
 // Layout constants
@@ -257,7 +258,63 @@ const findCyclicEdges = (nodes: GraphNode[], edges: GraphEdge[]): Set<string> =>
   return cyclicEdges;
 };
 
-const GraphCanvas: React.FC<GraphProps> = ({ data, onSelectFile }) => {
+const getDependencyChain = (
+  nodes: GraphNode[],
+  edges: GraphEdge[],
+  selectedId: string
+): { nodeIds: Set<string>; edgeIds: Set<string> } => {
+  const nodeIds = new Set<string>([selectedId]);
+  const edgeIds = new Set<string>();
+
+  const outgoing: Record<string, string[]> = {};
+  const incoming: Record<string, string[]> = {};
+
+  nodes.forEach((n) => {
+    outgoing[n.id] = [];
+    incoming[n.id] = [];
+  });
+
+  edges.forEach((e) => {
+    if (outgoing[e.source]) outgoing[e.source].push(e.target);
+    if (incoming[e.target]) incoming[e.target].push(e.source);
+  });
+
+  // 1. Traverse forward (dependencies)
+  const queueForward = [selectedId];
+  const visitedForward = new Set<string>([selectedId]);
+  while (queueForward.length > 0) {
+    const curr = queueForward.shift()!;
+    const targets = outgoing[curr] || [];
+    targets.forEach((t) => {
+      if (!visitedForward.has(t)) {
+        visitedForward.add(t);
+        nodeIds.add(t);
+        queueForward.push(t);
+      }
+      edgeIds.add(`${curr}->${t}`);
+    });
+  }
+
+  // 2. Traverse backward (dependents)
+  const queueBackward = [selectedId];
+  const visitedBackward = new Set<string>([selectedId]);
+  while (queueBackward.length > 0) {
+    const curr = queueBackward.shift()!;
+    const sources = incoming[curr] || [];
+    sources.forEach((s) => {
+      if (!visitedBackward.has(s)) {
+        visitedBackward.add(s);
+        nodeIds.add(s);
+        queueBackward.push(s);
+      }
+      edgeIds.add(`${s}->${curr}`);
+    });
+  }
+
+  return { nodeIds, edgeIds };
+};
+
+const GraphCanvas: React.FC<GraphProps> = ({ data, selectedFile, onSelectFile }) => {
   const { fitView, getNode, setCenter } = useReactFlow();
   const nodeTypes = useMemo(() => ({ fileNode: FileNode, folderNode: FolderGroupNode }), []);
 
@@ -345,6 +402,11 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, onSelectFile }) => {
     return findCyclicEdges(data.nodes, data.edges);
   }, [data.nodes, data.edges]);
 
+  const dependencyChain = useMemo(() => {
+    if (!selectedFile) return null;
+    return getDependencyChain(data.nodes, data.edges, selectedFile.path);
+  }, [data.nodes, data.edges, selectedFile]);
+
   const getEdgeColor = useMemo(() => (sourceId: string, targetId: string) => {
     if (cyclicEdges.has(JSON.stringify([sourceId, targetId]))) {
       return "#ef4444"; // Red for circular dependency
@@ -398,16 +460,28 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, onSelectFile }) => {
 
   useEffect(() => {
     const isSearchActive = searchQuery.trim() !== "";
+    const isSelectedActive = selectedFile !== null;
     const query = searchQuery.toLowerCase();
+    const combinedActive = isSearchActive || isLangFilterActive || isSelectedActive;
 
     setNodes(prev => prev.map(node => {
       if (node.data.isFolder) return node; // folder container nodes are never dimmed
       const filename = node.data.id.split("/").pop() || node.data.id;
       const passesSearch = !isSearchActive || filename.toLowerCase().includes(query);
       const passesLang = !isLangFilterActive || langFilter.has(node.data.language?.toLowerCase());
-      const combinedActive = isSearchActive || isLangFilterActive;
-      const isHighlighted = combinedActive && passesSearch && passesLang;
-      return { ...node, data: { ...node.data, isHighlighted, isSearchActive: combinedActive } };
+      const passesSelection = !isSelectedActive || (dependencyChain?.nodeIds.has(node.data.id) ?? false);
+      const isHighlighted = combinedActive && passesSearch && passesLang && passesSelection;
+      const isSelected = isSelectedActive && selectedFile?.path === node.data.id;
+
+      return {
+        ...node,
+        data: {
+          ...node.data,
+          isHighlighted,
+          isSelected,
+          isSearchActive: combinedActive
+        }
+      };
     }));
 
     setEdges(prev => prev.map(edge => {
@@ -415,10 +489,12 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, onSelectFile }) => {
       const isTargetMatch = (edge.target.split("/").pop() || edge.target).toLowerCase().includes(query);
       const passesLangSource = !isLangFilterActive || (filteredNodeIds?.has(edge.source) ?? true);
       const passesLangTarget = !isLangFilterActive || (filteredNodeIds?.has(edge.target) ?? true);
-      const combinedActive = isSearchActive || isLangFilterActive;
+      const passesSelection = !isSelectedActive || (dependencyChain?.edgeIds.has(`${edge.source}->${edge.target}`) ?? false);
+
       const isEdgeHighlighted = combinedActive &&
         (!isSearchActive || (isSourceMatch && isTargetMatch)) &&
-        passesLangSource && passesLangTarget;
+        passesLangSource && passesLangTarget &&
+        passesSelection;
       const defaultColor = getEdgeColor(edge.source, edge.target);
 
       return {
@@ -436,7 +512,7 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, onSelectFile }) => {
         },
       };
     }));
-  }, [searchQuery, langFilter, isLangFilterActive, filteredNodeIds, getEdgeColor]);
+  }, [searchQuery, langFilter, isLangFilterActive, filteredNodeIds, getEdgeColor, selectedFile, dependencyChain]);
 
   const onNodeClick = (_event: React.MouseEvent, node: any) => {
     if (node.data.isFolder) return; // clicking the folder container does nothing
@@ -488,16 +564,6 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, onSelectFile }) => {
                       zoom: 1.2,
                       duration: 800,
                     });
-                    setNodes((nds) =>
-                      nds.map((n) => ({
-                        ...n,
-                        data: {
-                          ...n.data,
-                          isHighlighted: n.id === node.id,
-                          isSearchActive: true,
-                        },
-                      }))
-                    );
                     onSelectFile({
                       path: node.id,
                       language: node.language,
@@ -587,18 +653,9 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, onSelectFile }) => {
           </div>
           <button
             onClick={() => {
-              setNodes((nds) =>
-                nds.map((n) => ({
-                  ...n,
-                  data: {
-                    ...n.data,
-                    isHighlighted: false,
-                    isSearchActive: false,
-                  },
-                }))
-              );
               setSearchQuery("");
               setLangFilter(new Set());
+              onSelectFile(null);
               fitView({ duration: 800 });
             }}
             className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs py-2 px-3 rounded-lg transition-all flex items-center justify-center gap-1.5 shadow-md shadow-indigo-950/50 cursor-pointer"
@@ -649,6 +706,7 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, onSelectFile }) => {
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onNodeClick={onNodeClick}
+          onPaneClick={() => onSelectFile(null)}
           fitView
           minZoom={0.1}
           maxZoom={1.5}

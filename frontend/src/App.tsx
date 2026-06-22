@@ -66,8 +66,14 @@ function App() {
     }
   };
 
-  const handleSelectFile = async (file: FileDetails) => {
+  const handleSelectFile = async (file: FileDetails | null) => {
     setSelectedFile(file);
+    if (!file) {
+      setSidePanelOpen(false);
+      setSummary(null);
+      return;
+    }
+
     setSidePanelOpen(true);
     setLoadingSummary(true);
     setSummary(null);
@@ -205,7 +211,11 @@ function App() {
       {/* Main Canvas Area */}
       <main className="flex-1 relative overflow-hidden bg-[#070b13]">
         {graphData ? (
-          <Graph data={graphData} onSelectFile={handleSelectFile} />
+          <Graph
+            data={graphData}
+            selectedFile={selectedFile}
+            onSelectFile={handleSelectFile}
+          />
         ) : (
           <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center space-y-4">
             {graphError ? (
@@ -230,7 +240,7 @@ function App() {
         {/* Side Panel for summaries */}
         <SidePanel
           isOpen={sidePanelOpen}
-          onClose={() => setSidePanelOpen(false)}
+          onClose={() => handleSelectFile(null)}
           fileInfo={selectedFile}
           summary={summary}
           loading={loadingSummary}
