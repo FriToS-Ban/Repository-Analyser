@@ -20,6 +20,7 @@ export const FileNode = memo(({ data }: any) => {
   const isSearchActive = data.isSearchActive;
   const isHighlighted = data.isHighlighted;
   const isSelected = data.isSelected;
+  const isOrphan = data.isOrphan;
 
   let highlightClass = "";
   if (isSearchActive) {
@@ -36,7 +37,7 @@ export const FileNode = memo(({ data }: any) => {
     <div
       className={`px-4 py-3 rounded-xl border backdrop-blur-sm shadow-xl transition-all duration-200 min-w-[150px] text-center select-none ${getLangStyles(
         data.language
-      )} ${highlightClass}`}
+      )} ${highlightClass} ${isOrphan ? "border-dashed" : ""}`}
     >
       <Handle
         type="target"

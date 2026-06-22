@@ -402,6 +402,22 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, selectedFile, onSelectFile })
     return findCyclicEdges(data.nodes, data.edges);
   }, [data.nodes, data.edges]);
 
+  const orphanNodeIds = useMemo(() => {
+    const orphans = new Set<string>();
+    const hasOutgoing = new Set<string>();
+    const hasIncoming = new Set<string>();
+    data.edges.forEach((e) => {
+      hasOutgoing.add(e.source);
+      hasIncoming.add(e.target);
+    });
+    data.nodes.forEach((n) => {
+      if (!hasOutgoing.has(n.id) && !hasIncoming.has(n.id)) {
+        orphans.add(n.id);
+      }
+    });
+    return orphans;
+  }, [data.nodes, data.edges]);
+
   const dependencyChain = useMemo(() => {
     if (!selectedFile) return null;
     return getDependencyChain(data.nodes, data.edges, selectedFile.path);
@@ -427,7 +443,10 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, selectedFile, onSelectFile })
     }
 
     const { rfNodes } = layoutNodesGrouped(data.nodes, data.edges);
-    setNodes(rfNodes);
+    setNodes(rfNodes.map(n => ({
+      ...n,
+      data: { ...n.data, isOrphan: n.data.isFolder ? false : orphanNodeIds.has(n.id) }
+    })));
 
     setEdges(data.edges.map((e, index) => {
       const color = getEdgeColor(e.source, e.target);
@@ -446,7 +465,7 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, selectedFile, onSelectFile })
         },
       };
     }));
-  }, [data, getEdgeColor]);
+  }, [data, getEdgeColor, orphanNodeIds]);
 
   const prevDataRef = useRef(data);
 
