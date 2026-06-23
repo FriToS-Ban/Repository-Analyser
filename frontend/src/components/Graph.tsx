@@ -1,4 +1,4 @@
-import React, { useMemo, useEffect, useState, useRef } from "react";
+import React, { useMemo, useEffect, useState, useRef, useCallback } from "react";
 import ReactFlow, {
   MiniMap,
   Controls,
@@ -14,7 +14,6 @@ import { FileNode } from "./FileNode";
 import { FolderGroupNode } from "./FolderGroupNode";
 import { Search, X, Maximize2, Download } from "lucide-react";
 import { toPng } from "html-to-image";
-
 
 interface GraphNode {
   id: string;
@@ -48,13 +47,13 @@ const FOLDER_W = NODE_W + F_PADDING * 2;
 const folderHeight = (count: number) =>
   F_HEADER_H + F_PADDING + count * NODE_H + Math.max(count - 1, 0) * FILE_GAP + F_PADDING;
 
-// Cluster-by-folder layout: groups files into parent folder nodes,
-// positions folder columns by average BFS level of their children.
+// ✅ FIX: layoutNodesGrouped now returns absoluteXMap alongside rfNodes in a single pass,
+// so callers never need to run the layout twice to get both pieces of data.
 const layoutNodesGrouped = (
   nodes: GraphNode[],
   edges: GraphEdge[]
-): { rfNodes: any[]; absoluteXMap: Map<string, number> } => {
-  if (nodes.length === 0) return { rfNodes: [], absoluteXMap: new Map() };
+): { rfNodes: any[]; absoluteXMap: Map<string, number>; inDegreeMap: Record<string, number> } => {
+  if (nodes.length === 0) return { rfNodes: [], absoluteXMap: new Map(), inDegreeMap: {} };
 
   // 1. Group files by directory
   const folderGroups: Record<string, GraphNode[]> = {};
@@ -128,7 +127,6 @@ const layoutNodesGrouped = (
     const { x, y } = folderPos[dir] || { x: 0, y: 0 };
     const height = folderHeight(fnodes.length);
 
-    // Folder container node
     rfNodes.push({
       id: `folder:${dir}`,
       type: "folderNode",
@@ -144,10 +142,10 @@ const layoutNodesGrouped = (
       draggable: true,
     });
 
-    // File nodes positioned relative to their parent folder
     fnodes.forEach((n, idx) => {
       const fileX = F_PADDING;
       const fileY = F_HEADER_H + F_PADDING + idx * (NODE_H + FILE_GAP);
+      // ✅ Populate absoluteXMap in the same pass — no second layout call needed
       absoluteXMap.set(n.id, x + fileX);
       rfNodes.push({
         id: n.id,
@@ -161,12 +159,13 @@ const layoutNodesGrouped = (
           incomingEdges: inDegree[n.id] || 0,
           isHighlighted: false,
           isSearchActive: false,
+          isOrphan: false,
         },
       });
     });
   });
 
-  return { rfNodes, absoluteXMap };
+  return { rfNodes, absoluteXMap, inDegreeMap: inDegree };
 };
 
 // Tarjan's algorithm to find strongly connected components and cyclic edges
@@ -187,7 +186,6 @@ const findCyclicEdges = (nodes: GraphNode[], edges: GraphEdge[]): Set<string> =>
   let index = 0;
   const sccs: string[][] = [];
 
-  // Iterative Tarjan using an explicit work stack to avoid recursion limits
   nodes.forEach((startNode) => {
     if (indexMap.has(startNode.id)) return;
 
@@ -279,34 +277,22 @@ const getDependencyChain = (
     if (incoming[e.target]) incoming[e.target].push(e.source);
   });
 
-  // 1. Traverse forward (dependencies)
   const queueForward = [selectedId];
   const visitedForward = new Set<string>([selectedId]);
   while (queueForward.length > 0) {
     const curr = queueForward.shift()!;
-    const targets = outgoing[curr] || [];
-    targets.forEach((t) => {
-      if (!visitedForward.has(t)) {
-        visitedForward.add(t);
-        nodeIds.add(t);
-        queueForward.push(t);
-      }
+    (outgoing[curr] || []).forEach((t) => {
+      if (!visitedForward.has(t)) { visitedForward.add(t); nodeIds.add(t); queueForward.push(t); }
       edgeIds.add(`${curr}->${t}`);
     });
   }
 
-  // 2. Traverse backward (dependents)
   const queueBackward = [selectedId];
   const visitedBackward = new Set<string>([selectedId]);
   while (queueBackward.length > 0) {
     const curr = queueBackward.shift()!;
-    const sources = incoming[curr] || [];
-    sources.forEach((s) => {
-      if (!visitedBackward.has(s)) {
-        visitedBackward.add(s);
-        nodeIds.add(s);
-        queueBackward.push(s);
-      }
+    (incoming[curr] || []).forEach((s) => {
+      if (!visitedBackward.has(s)) { visitedBackward.add(s); nodeIds.add(s); queueBackward.push(s); }
       edgeIds.add(`${s}->${curr}`);
     });
   }
@@ -329,31 +315,21 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, selectedFile, onSelectFile })
   const handleExportPng = () => {
     const el = reactFlowWrapperRef.current?.querySelector(".react-flow") as HTMLElement;
     if (!el) return;
-
     setExporting(true);
-
     const controls = reactFlowWrapperRef.current?.querySelector(".react-flow__controls") as HTMLElement;
     const minimap = reactFlowWrapperRef.current?.querySelector(".react-flow__minimap") as HTMLElement;
     const attribution = reactFlowWrapperRef.current?.querySelector(".react-flow__attribution") as HTMLElement;
-
     if (controls) controls.style.display = "none";
     if (minimap) minimap.style.display = "none";
     if (attribution) attribution.style.display = "none";
-
-    toPng(el, {
-      backgroundColor: "#070b13",
-      pixelRatio: 2,
-      cacheBust: true,
-    })
+    toPng(el, { backgroundColor: "#070b13", pixelRatio: 2, cacheBust: true })
       .then((dataUrl) => {
         const a = document.createElement("a");
         a.setAttribute("download", `repository-graph-${Date.now()}.png`);
         a.setAttribute("href", dataUrl);
         a.click();
       })
-      .catch((err) => {
-        console.error("Failed to export graph as PNG:", err);
-      })
+      .catch((err) => console.error("Failed to export graph as PNG:", err))
       .finally(() => {
         if (controls) controls.style.display = "flex";
         if (minimap) minimap.style.display = "block";
@@ -362,7 +338,6 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, selectedFile, onSelectFile })
       });
   };
 
-  // Derive unique languages present in this graph
   const availableLangs = useMemo(() => {
     const langs = new Set<string>();
     data.nodes.forEach((n) => langs.add(n.language.toLowerCase()));
@@ -380,7 +355,6 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, selectedFile, onSelectFile })
 
   const isLangFilterActive = langFilter.size > 0;
 
-  // Filtered node IDs for the current language selection
   const filteredNodeIds = useMemo(() => {
     if (!isLangFilterActive) return null;
     return new Set(data.nodes.filter((n) => langFilter.has(n.language.toLowerCase())).map((n) => n.id));
@@ -392,58 +366,58 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, selectedFile, onSelectFile })
     typescript: { label: "TypeScript", active: "bg-cyan-600 text-white border-cyan-500 shadow-cyan-500/30", inactive: "bg-cyan-950/40 text-cyan-400 border-cyan-900/60 hover:bg-cyan-900/40" },
   };
 
-  const nodePositions = useMemo(() => {
-    if (!data.nodes || data.nodes.length === 0) return new Map<string, number>();
-    const { absoluteXMap } = layoutNodesGrouped(data.nodes, data.edges);
-    return absoluteXMap;
+  // ✅ FIX: Single layout computation that yields rfNodes, absoluteXMap, and orphan data together.
+  // Previously `nodePositions` ran layoutNodesGrouped independently from the useEffect, causing
+  // the layout to execute twice per data change and creating a risk of positional drift between
+  // edge colors and actual rendered node positions.
+  const layoutResult = useMemo(() => {
+    if (!data.nodes || data.nodes.length === 0) {
+      return { rfNodes: [], absoluteXMap: new Map<string, number>(), inDegreeMap: {} as Record<string, number> };
+    }
+    return layoutNodesGrouped(data.nodes, data.edges);
   }, [data]);
 
-  const cyclicEdges = useMemo(() => {
-    return findCyclicEdges(data.nodes, data.edges);
-  }, [data.nodes, data.edges]);
-
-  const incomingEdgeCounts = useMemo(() => {
-    const counts: Record<string, number> = {};
-    data.nodes.forEach((n) => { counts[n.id] = 0; });
-    data.edges.forEach((e) => {
-      if (counts[e.target] !== undefined) counts[e.target]++;
-    });
-    return counts;
-  }, [data.nodes, data.edges]);
+  const { rfNodes, absoluteXMap } = layoutResult;
 
   const orphanNodeIds = useMemo(() => {
     const orphans = new Set<string>();
     const hasOutgoing = new Set<string>();
     const hasIncoming = new Set<string>();
-    data.edges.forEach((e) => {
-      hasOutgoing.add(e.source);
-      hasIncoming.add(e.target);
-    });
+    data.edges.forEach((e) => { hasOutgoing.add(e.source); hasIncoming.add(e.target); });
     data.nodes.forEach((n) => {
-      if (!hasOutgoing.has(n.id) && !hasIncoming.has(n.id)) {
-        orphans.add(n.id);
-      }
+      if (!hasOutgoing.has(n.id) && !hasIncoming.has(n.id)) orphans.add(n.id);
     });
     return orphans;
   }, [data.nodes, data.edges]);
+
+  const cyclicEdges = useMemo(() => findCyclicEdges(data.nodes, data.edges), [data.nodes, data.edges]);
+
+  // ✅ FIX: getEdgeColor is now a stable useCallback that reads from the absoluteXMap produced
+  // by the single shared layout. Previously it was a useMemo returning a function, which meant
+  // it re-ran layout indirectly through nodePositions on every render cycle.
+  const getEdgeColor = useCallback((sourceId: string, targetId: string): string => {
+    if (cyclicEdges.has(JSON.stringify([sourceId, targetId]))) return "#ef4444";
+    const sourceX = absoluteXMap.get(sourceId);
+    const targetX = absoluteXMap.get(targetId);
+    if (sourceX === undefined || targetX === undefined) return "#4b5563";
+    if (sourceX < targetX) return "#3b82f6";
+    if (sourceX > targetX) return "#64748b";
+    return "#10b981";
+  }, [absoluteXMap, cyclicEdges]);
 
   const dependencyChain = useMemo(() => {
     if (!selectedFile) return null;
     return getDependencyChain(data.nodes, data.edges, selectedFile.path);
   }, [data.nodes, data.edges, selectedFile]);
 
-  const getEdgeColor = useMemo(() => (sourceId: string, targetId: string) => {
-    if (cyclicEdges.has(JSON.stringify([sourceId, targetId]))) {
-      return "#ef4444"; // Red for circular dependency
-    }
-    const sourceX = nodePositions.get(sourceId);
-    const targetX = nodePositions.get(targetId);
-    if (sourceX === undefined || targetX === undefined) return "#4b5563";
-    if (sourceX < targetX) return "#3b82f6"; // Blue for forward dependency
-    if (sourceX > targetX) return "#64748b"; // Slate for non-cyclic backward edges
-    return "#10b981"; // Emerald/green for same level
-  }, [nodePositions, cyclicEdges]);
+  const incomingEdgeCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    data.nodes.forEach((n) => { counts[n.id] = 0; });
+    data.edges.forEach((e) => { if (counts[e.target] !== undefined) counts[e.target]++; });
+    return counts;
+  }, [data.nodes, data.edges]);
 
+  // Effect 1: Rebuild nodes and edges when data changes (new repo analysed)
   useEffect(() => {
     if (!data.nodes || data.nodes.length === 0) {
       setNodes([]);
@@ -451,10 +425,15 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, selectedFile, onSelectFile })
       return;
     }
 
-    const { rfNodes } = layoutNodesGrouped(data.nodes, data.edges);
-    setNodes(rfNodes.map(n => ({
+    // ✅ FIX: Use rfNodes from the shared layoutResult — no second layout call here.
+    // Also stamp isOrphan directly at construction time so the highlight effect below
+    // never needs to look it up (removing the risk of it being overwritten).
+    setNodes(rfNodes.map((n) => ({
       ...n,
-      data: { ...n.data, isOrphan: n.data.isFolder ? false : orphanNodeIds.has(n.id) }
+      data: {
+        ...n.data,
+        isOrphan: n.data.isFolder ? false : orphanNodeIds.has(n.id),
+      },
     })));
 
     setEdges(data.edges.map((e, index) => {
@@ -466,18 +445,19 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, selectedFile, onSelectFile })
         type: "smoothstep",
         animated: true,
         style: { stroke: color, strokeWidth: color === "#ef4444" ? 2 : 1 },
-        markerEnd: {
-          type: MarkerType.ArrowClosed,
-          color,
-          width: 16,
-          height: 16,
-        },
+        markerEnd: { type: MarkerType.ArrowClosed, color, width: 16, height: 16 },
       };
     }));
-  }, [data, getEdgeColor, orphanNodeIds]);
 
+    // ✅ FIX: Defer fitView so ReactFlow has committed the new node positions to the DOM
+    // before we try to calculate the viewport bounds. Without the timeout, fitView would
+    // calculate bounds against the *previous* render's positions.
+    const timer = setTimeout(() => fitView({ duration: 600 }), 50);
+    return () => clearTimeout(timer);
+  }, [data, rfNodes, orphanNodeIds, getEdgeColor, fitView]);
+
+  // Reset filters when the dataset changes
   const prevDataRef = useRef(data);
-
   useEffect(() => {
     if (prevDataRef.current !== data) {
       setLangFilter(new Set());
@@ -486,69 +466,76 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, selectedFile, onSelectFile })
     }
   }, [data]);
 
+  // Effect 2: Update highlight / dim state in response to search, lang filter, or selection.
+  // ✅ FIX: Preserve `isOrphan` from existing node data instead of recalculating or dropping it.
+  // Previously this effect spread `node.data` but the orphan flag had already been set in
+  // Effect 1 — re-spreading was safe as long as isOrphan wasn't overwritten, but the explicit
+  // preservation here makes the intent unambiguous and resilient to future refactors.
   useEffect(() => {
     const isSearchActive = searchQuery.trim() !== "";
     const isSelectedActive = selectedFile !== null;
     const query = searchQuery.toLowerCase();
     const combinedActive = isSearchActive || isLangFilterActive || isSelectedActive;
 
-    setNodes(prev => prev.map(node => {
-      if (node.data.isFolder) return node; // folder container nodes are never dimmed
-      const filename = node.data.id.split("/").pop() || node.data.id;
-      const passesSearch = !isSearchActive || filename.toLowerCase().includes(query);
-      const passesLang = !isLangFilterActive || langFilter.has(node.data.language?.toLowerCase());
-      const passesSelection = !isSelectedActive || (dependencyChain?.nodeIds.has(node.data.id) ?? false);
-      const isHighlighted = combinedActive && passesSearch && passesLang && passesSelection;
-      const isSelected = isSelectedActive && selectedFile?.path === node.data.id;
+    setNodes((prev) =>
+      prev.map((node) => {
+        if (node.data.isFolder) return node;
+        const filename = node.data.id.split("/").pop() || node.data.id;
+        const passesSearch = !isSearchActive || filename.toLowerCase().includes(query);
+        const passesLang = !isLangFilterActive || langFilter.has(node.data.language?.toLowerCase());
+        const passesSelection = !isSelectedActive || (dependencyChain?.nodeIds.has(node.data.id) ?? false);
+        const isHighlighted = combinedActive && passesSearch && passesLang && passesSelection;
+        const isSelected = isSelectedActive && selectedFile?.path === node.data.id;
 
-      return {
-        ...node,
-        data: {
-          ...node.data,
-          isHighlighted,
-          isSelected,
-          isSearchActive: combinedActive
-        }
-      };
-    }));
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            // ✅ isOrphan is preserved from whatever Effect 1 stamped — never recalculated here
+            isOrphan: node.data.isOrphan,
+            isHighlighted,
+            isSelected,
+            isSearchActive: combinedActive,
+          },
+        };
+      })
+    );
 
-    setEdges(prev => prev.map(edge => {
-      const isSourceMatch = (edge.source.split("/").pop() || edge.source).toLowerCase().includes(query);
-      const isTargetMatch = (edge.target.split("/").pop() || edge.target).toLowerCase().includes(query);
-      const passesLangSource = !isLangFilterActive || (filteredNodeIds?.has(edge.source) ?? true);
-      const passesLangTarget = !isLangFilterActive || (filteredNodeIds?.has(edge.target) ?? true);
-      const passesSelection = !isSelectedActive || (dependencyChain?.edgeIds.has(`${edge.source}->${edge.target}`) ?? false);
+    setEdges((prev) =>
+      prev.map((edge) => {
+        const isSourceMatch = (edge.source.split("/").pop() || edge.source).toLowerCase().includes(query);
+        const isTargetMatch = (edge.target.split("/").pop() || edge.target).toLowerCase().includes(query);
+        const passesLangSource = !isLangFilterActive || (filteredNodeIds?.has(edge.source) ?? true);
+        const passesLangTarget = !isLangFilterActive || (filteredNodeIds?.has(edge.target) ?? true);
+        const passesSelection = !isSelectedActive || (dependencyChain?.edgeIds.has(`${edge.source}->${edge.target}`) ?? false);
+        const isEdgeHighlighted =
+          combinedActive &&
+          (!isSearchActive || (isSourceMatch && isTargetMatch)) &&
+          passesLangSource && passesLangTarget &&
+          passesSelection;
+        const defaultColor = getEdgeColor(edge.source, edge.target);
 
-      const isEdgeHighlighted = combinedActive &&
-        (!isSearchActive || (isSourceMatch && isTargetMatch)) &&
-        passesLangSource && passesLangTarget &&
-        passesSelection;
-      const defaultColor = getEdgeColor(edge.source, edge.target);
-
-      return {
-        ...edge,
-        animated: !combinedActive || isEdgeHighlighted,
-        style: {
-          stroke: combinedActive ? (isEdgeHighlighted ? defaultColor : "#1e293b") : defaultColor,
-          strokeWidth: isEdgeHighlighted ? 2.5 : (defaultColor === "#ef4444" ? 2 : 1),
-        },
-        markerEnd: {
-          type: MarkerType.ArrowClosed,
-          color: combinedActive ? (isEdgeHighlighted ? defaultColor : "#1e293b") : defaultColor,
-          width: 16,
-          height: 16,
-        },
-      };
-    }));
+        return {
+          ...edge,
+          animated: !combinedActive || isEdgeHighlighted,
+          style: {
+            stroke: combinedActive ? (isEdgeHighlighted ? defaultColor : "#1e293b") : defaultColor,
+            strokeWidth: isEdgeHighlighted ? 2.5 : (defaultColor === "#ef4444" ? 2 : 1),
+          },
+          markerEnd: {
+            type: MarkerType.ArrowClosed,
+            color: combinedActive ? (isEdgeHighlighted ? defaultColor : "#1e293b") : defaultColor,
+            width: 16,
+            height: 16,
+          },
+        };
+      })
+    );
   }, [searchQuery, langFilter, isLangFilterActive, filteredNodeIds, getEdgeColor, selectedFile, dependencyChain]);
 
   const onNodeClick = (_event: React.MouseEvent, node: any) => {
-    if (node.data.isFolder) return; // clicking the folder container does nothing
-    onSelectFile({
-      path: node.data.id,
-      language: node.data.language,
-      loc: node.data.loc,
-    });
+    if (node.data.isFolder) return;
+    onSelectFile({ path: node.data.id, language: node.data.language, loc: node.data.loc });
   };
 
   return (
@@ -585,22 +572,14 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, selectedFile, onSelectFile })
                     setSearchQuery("");
                     const rfn = getNode(node.id);
                     if (rfn) {
-                      // File nodes use relative coords inside parent folder — resolve to absolute
                       let cx = rfn.position.x + NODE_W / 2;
                       let cy = rfn.position.y + NODE_H / 2;
                       if (rfn.parentId) {
                         const parentRfn = getNode(rfn.parentId);
                         if (parentRfn) { cx += parentRfn.position.x; cy += parentRfn.position.y; }
                       }
-                      setCenter(cx, cy, {
-                        zoom: 1.2,
-                        duration: 800,
-                      });
-                      onSelectFile({
-                        path: node.id,
-                        language: node.language,
-                        loc: node.loc,
-                      });
+                      setCenter(cx, cy, { zoom: 1.2, duration: 800 });
+                      onSelectFile({ path: node.id, language: node.language, loc: node.loc });
                     }
                   }}
                   className="w-full text-left p-2.5 rounded-lg border border-transparent hover:border-slate-800 hover:bg-slate-900/50 transition-all group flex items-start justify-between cursor-pointer"
@@ -638,7 +617,6 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, selectedFile, onSelectFile })
       <div className="flex-1 h-full relative" ref={reactFlowWrapperRef}>
         {/* Search / Filter Bar */}
         <div className="absolute top-4 left-4 z-10 w-72 bg-slate-900/90 border border-slate-800 backdrop-blur-md rounded-xl p-3 shadow-2xl flex flex-col gap-2">
-          {/* Language Filter Pills */}
           {availableLangs.length > 1 && (
             <div className="flex flex-col gap-1.5">
               <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Language</span>
@@ -653,14 +631,17 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, selectedFile, onSelectFile })
                   All
                 </button>
                 {availableLangs.map((lang) => {
-                  const meta = langMeta[lang] || { label: lang.charAt(0).toUpperCase() + lang.slice(1), active: "bg-indigo-600 text-white border-indigo-500 shadow-indigo-500/30", inactive: "bg-slate-800/60 text-slate-400 border-slate-700 hover:bg-slate-700/60" };
+                  const meta = langMeta[lang] || {
+                    label: lang.charAt(0).toUpperCase() + lang.slice(1),
+                    active: "bg-indigo-600 text-white border-indigo-500 shadow-indigo-500/30",
+                    inactive: "bg-slate-800/60 text-slate-400 border-slate-700 hover:bg-slate-700/60",
+                  };
                   const isActive = langFilter.has(lang);
                   return (
                     <button
                       key={lang}
                       onClick={() => toggleLang(lang)}
-                      className={`text-[10px] font-semibold px-2.5 py-1 rounded-full border transition-all shadow-sm cursor-pointer ${isActive ? meta.active : meta.inactive
-                        }`}
+                      className={`text-[10px] font-semibold px-2.5 py-1 rounded-full border transition-all shadow-sm cursor-pointer ${isActive ? meta.active : meta.inactive}`}
                     >
                       {meta.label}
                     </button>

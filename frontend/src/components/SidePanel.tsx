@@ -20,9 +20,12 @@ export const SidePanel: React.FC<SidePanelProps> = ({
   summary,
   loading,
 }) => {
-  if (!fileInfo) return null;
-
+  // ✅ FIX: useState must be called unconditionally — hooks cannot appear after an early return.
+  // Previously `useState` was placed after `if (!fileInfo) return null`, which is a Rules of Hooks
+  // violation that causes React to crash with "Rendered fewer hooks than expected".
   const [copied, setCopied] = useState(false);
+
+  if (!fileInfo) return null;
 
   const handleCopy = async () => {
     if (!summary) return;
@@ -116,11 +119,10 @@ export const SidePanel: React.FC<SidePanelProps> = ({
               <button
                 onClick={handleCopy}
                 title={copied ? "Copied!" : "Copy summary"}
-                className={`flex items-center gap-1.5 text-[10px] font-semibold px-2.5 py-1 rounded-lg border transition-all duration-200 cursor-pointer ${
-                  copied
-                    ? "bg-emerald-950/40 text-emerald-400 border-emerald-700/50 shadow-sm shadow-emerald-950/40"
-                    : "bg-slate-800/60 text-slate-400 border-slate-700 hover:bg-slate-700/60 hover:text-slate-200"
-                }`}
+                className={`flex items-center gap-1.5 text-[10px] font-semibold px-2.5 py-1 rounded-lg border transition-all duration-200 cursor-pointer ${copied
+                  ? "bg-emerald-950/40 text-emerald-400 border-emerald-700/50 shadow-sm shadow-emerald-950/40"
+                  : "bg-slate-800/60 text-slate-400 border-slate-700 hover:bg-slate-700/60 hover:text-slate-200"
+                  }`}
               >
                 {copied ? (
                   <><Check className="h-3 w-3" /> Copied!</>
@@ -130,7 +132,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
               </button>
             )}
           </div>
-          
+
           {loading ? (
             <div className="flex flex-col items-center justify-center py-12 space-y-3">
               <div className="h-8 w-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>

@@ -41,7 +41,7 @@ export const FileNode = memo(({ data }: any) => {
     >
       <Handle
         type="target"
-        position={Position.Top}
+        position={Position.Left}
         className="!bg-slate-500 !w-2.5 !h-2.5"
       />
       <div className="font-semibold text-xs truncate max-w-[160px] tracking-wide">
@@ -54,7 +54,7 @@ export const FileNode = memo(({ data }: any) => {
       </div>
       <Handle
         type="source"
-        position={Position.Bottom}
+        position={Position.Right}
         className="!bg-slate-500 !w-2.5 !h-2.5"
       />
     </div>
