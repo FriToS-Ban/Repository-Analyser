@@ -37,8 +37,13 @@ def get_graph(path: str = Query(..., description="Absolute path of the Git repos
 @app.post("/api/summarise")
 def summarise_file(request: SummariseRequest):
     repo_abs = os.path.abspath(request.repo_path)
-    file_abs = os.path.join(repo_abs, request.file_path)
-    
+    file_abs = os.path.abspath(os.path.join(repo_abs, request.file_path))
+
+    # Ensure file_abs stays inside repo_abs to prevent path traversal
+    # (e.g. file_path="../../../../etc/passwd").
+    if os.path.commonpath([repo_abs, file_abs]) != repo_abs:
+        raise HTTPException(status_code=400, detail="Invalid file_path: must be inside repo_path.")
+
     if not os.path.exists(file_abs):
         raise HTTPException(status_code=404, detail=f"File {request.file_path} not found in repository.")
         

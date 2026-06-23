@@ -1,4 +1,5 @@
 import os
+import sys
 import ast
 import re
 
@@ -14,6 +15,10 @@ EXCLUDE_DIRS = {
     ".idea",
     ".vscode"
 }
+
+# Top-level stdlib module names, used to avoid resolving e.g. `import types`
+# to a local types.py file that happens to share the name.
+STDLIB_MODULES = set(sys.stdlib_module_names)
 
 def get_language(extension: str) -> str:
     ext = extension.lower()
@@ -31,7 +36,8 @@ def count_loc(file_path: str) -> int:
             lines = f.readlines()
         # Count non-empty lines
         return sum(1 for line in lines if line.strip())
-    except Exception:
+    except Exception as e:
+        print(f"[parser] Failed to read {file_path}: {e}", file=sys.stderr)
         return 0
 
 def extract_python_imports(file_path: str) -> list[tuple[str, int]]:
@@ -51,8 +57,8 @@ def extract_python_imports(file_path: str) -> list[tuple[str, int]]:
                     imports.append((alias.name, 0))
             elif isinstance(node, ast.ImportFrom):
                 imports.append((node.module or "", node.level))
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[parser] Failed to parse Python imports in {file_path}: {e}", file=sys.stderr)
     return imports
 
 def extract_js_ts_imports(file_path: str) -> list[str]:
@@ -76,8 +82,8 @@ def extract_js_ts_imports(file_path: str) -> list[str]:
             matches = re.findall(pattern, content)
             for m in matches:
                 imports.append(m)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[parser] Failed to parse JS/TS imports in {file_path}: {e}", file=sys.stderr)
     return imports
 
 def parse_repo(root_path: str) -> dict:
@@ -156,6 +162,13 @@ def parse_repo(root_path: str) -> dict:
                 
                 # Absolute or relative package-level import
                 else:
+                    # Skip stdlib modules so a local file that happens to share
+                    # a name with a stdlib module (e.g. types.py, json.py) doesn't
+                    # produce a false dependency edge.
+                    top_level_mod = mod_name.split(".")[0]
+                    if top_level_mod in STDLIB_MODULES:
+                        continue
+
                     mod_path = mod_name.replace(".", "/")
                     
                     # Try resolving from current directory first
@@ -183,7 +196,13 @@ def parse_repo(root_path: str) -> dict:
                 # Resolve the relative path
                 resolved_rel = None
                 target_base = os.path.normpath(os.path.join(current_dir, imp_path)).replace("\\", "/")
-                if target_base.startswith("../"):
+
+                # Boundary check: confirm the resolved path is still inside the
+                # repo root, rather than just checking the string prefix (which
+                # incorrectly rejected some valid in-repo "../" imports and
+                # wasn't a reliable boundary check to begin with).
+                target_abs = os.path.abspath(os.path.join(root_path, target_base))
+                if os.path.commonpath([root_path, target_abs]) != root_path:
                     # Outside repository root
                     continue
                 
