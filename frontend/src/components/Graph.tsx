@@ -14,25 +14,26 @@ import { FileNode } from "./FileNode";
 import { FolderGroupNode } from "./FolderGroupNode";
 import { Search, X, Maximize2, Download } from "lucide-react";
 import { toPng } from "html-to-image";
+export const getDiffNodeStyle = (status?: string) => { ... };
 
 interface GraphNode {
   id: string;
   language: string;
   loc: number;
+  status?: "added" | "removed" | "changed" | "unchanged";
 }
 
 interface GraphEdge {
   source: string;
   target: string;
+  status?: "added" | "removed" | "unchanged";
 }
 
 interface GraphProps {
-  data: {
-    nodes: GraphNode[];
-    edges: GraphEdge[];
-  };
+  data: { nodes: GraphNode[]; edges: GraphEdge[]; };
   selectedFile: { path: string; language: string; loc: number } | null;
   onSelectFile: (file: { path: string; language: string; loc: number } | null) => void;
+  diffMode?: boolean;
 }
 
 // Layout constants
@@ -300,7 +301,22 @@ const getDependencyChain = (
   return { nodeIds, edgeIds };
 };
 
-const GraphCanvas: React.FC<GraphProps> = ({ data, selectedFile, onSelectFile }) => {
+const DIFF_EDGE_COLORS: Record<string, string> = {
+  added: "#10b981",
+  removed: "#ef4444",
+  unchanged: "#334155",
+};
+
+const getDiffNodeStyle = (status?: string) => {
+  switch (status) {
+    case "added": return "ring-2 ring-emerald-400 border-emerald-400 shadow-[0_0_16px_rgba(52,211,153,0.45)]";
+    case "removed": return "ring-2 ring-red-400 border-red-400 shadow-[0_0_16px_rgba(248,113,113,0.45)] opacity-60";
+    case "changed": return "ring-2 ring-yellow-400 border-yellow-400 shadow-[0_0_16px_rgba(250,204,21,0.45)]";
+    default: return "opacity-40";
+  }
+};
+
+const GraphCanvas: React.FC<GraphProps> = ({ data, selectedFile, onSelectFile, diffMode = false }) => {
   const { fitView, getNode, setCenter } = useReactFlow();
   const nodeTypes = useMemo(() => ({ fileNode: FileNode, folderNode: FolderGroupNode }), []);
 
@@ -395,7 +411,8 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, selectedFile, onSelectFile })
   // ✅ FIX: getEdgeColor is now a stable useCallback that reads from the absoluteXMap produced
   // by the single shared layout. Previously it was a useMemo returning a function, which meant
   // it re-ran layout indirectly through nodePositions on every render cycle.
-  const getEdgeColor = useCallback((sourceId: string, targetId: string): string => {
+  const getEdgeColor = useCallback((sourceId: string, targetId: string, edgeStatus?: string): string => {
+    if (diffMode && edgeStatus) return DIFF_EDGE_COLORS[edgeStatus] ?? "#334155";
     if (cyclicEdges.has(JSON.stringify([sourceId, targetId]))) return "#ef4444";
     const sourceX = absoluteXMap.get(sourceId);
     const targetX = absoluteXMap.get(targetId);
@@ -403,7 +420,7 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, selectedFile, onSelectFile })
     if (sourceX < targetX) return "#3b82f6";
     if (sourceX > targetX) return "#64748b";
     return "#10b981";
-  }, [absoluteXMap, cyclicEdges]);
+  }, [absoluteXMap, cyclicEdges, diffMode]);
 
   const dependencyChain = useMemo(() => {
     if (!selectedFile) return null;
@@ -433,18 +450,24 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, selectedFile, onSelectFile })
       data: {
         ...n.data,
         isOrphan: n.data.isFolder ? false : orphanNodeIds.has(n.id),
+        diffStatus: diffMode ? (data.nodes.find((dn) => dn.id === n.id)?.status) : undefined, // ← add
       },
     })));
 
     setEdges(data.edges.map((e, index) => {
-      const color = getEdgeColor(e.source, e.target);
+      const color = getEdgeColor(e.source, e.target, e.status); // ← pass e.status
+      const isRemoved = e.status === "removed";
       return {
         id: `e-${index}`,
         source: e.source,
         target: e.target,
         type: "smoothstep",
-        animated: true,
-        style: { stroke: color, strokeWidth: color === "#ef4444" ? 2 : 1 },
+        animated: !isRemoved,
+        style: {
+          stroke: color,
+          strokeWidth: (color === "#ef4444" || e.status === "added") ? 2 : 1,
+          strokeDasharray: isRemoved ? "5,4" : undefined,
+        },
         markerEnd: { type: MarkerType.ArrowClosed, color, width: 16, height: 16 },
       };
     }));

@@ -1,5 +1,6 @@
 import { memo } from "react";
 import { Handle, Position } from "reactflow";
+import { getDiffNodeStyle } from "./Graph";
 
 export const FileNode = memo(({ data }: any) => {
   const getLangStyles = (lang: string) => {
@@ -21,6 +22,7 @@ export const FileNode = memo(({ data }: any) => {
   const isHighlighted = data.isHighlighted;
   const isSelected = data.isSelected;
   const isOrphan = data.isOrphan;
+  const diffStatus = data.diffStatus as string | undefined;
 
   let highlightClass = "";
   if (isSearchActive) {
@@ -35,9 +37,7 @@ export const FileNode = memo(({ data }: any) => {
 
   return (
     <div
-      className={`px-4 py-3 rounded-xl border backdrop-blur-sm shadow-xl transition-all duration-200 min-w-[150px] text-center select-none ${getLangStyles(
-        data.language
-      )} ${highlightClass} ${isOrphan ? "border-dashed" : ""}`}
+      className={`px-4 py-3 rounded-xl border backdrop-blur-sm shadow-xl transition-all duration-200 min-w-[150px] text-center select-none ${diffStatus ? getDiffNodeStyle(diffStatus) : getLangStyles(data.language)} ${!diffStatus ? highlightClass : ""} ${isOrphan && !diffStatus ? "border-dashed" : ""}
     >
       <Handle
         type="target"
