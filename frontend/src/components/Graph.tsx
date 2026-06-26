@@ -14,7 +14,6 @@ import { FileNode } from "./FileNode";
 import { FolderGroupNode } from "./FolderGroupNode";
 import { Search, X, Maximize2, Download } from "lucide-react";
 import { toPng } from "html-to-image";
-export const getDiffNodeStyle = (status?: string) => { ... };
 
 interface GraphNode {
   id: string;
@@ -307,7 +306,7 @@ const DIFF_EDGE_COLORS: Record<string, string> = {
   unchanged: "#334155",
 };
 
-const getDiffNodeStyle = (status?: string) => {
+export const getDiffNodeStyle = (status?: string) => {
   switch (status) {
     case "added": return "ring-2 ring-emerald-400 border-emerald-400 shadow-[0_0_16px_rgba(52,211,153,0.45)]";
     case "removed": return "ring-2 ring-red-400 border-red-400 shadow-[0_0_16px_rgba(248,113,113,0.45)] opacity-60";

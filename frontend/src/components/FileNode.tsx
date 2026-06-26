@@ -37,7 +37,7 @@ export const FileNode = memo(({ data }: any) => {
 
   return (
     <div
-      className={`px-4 py-3 rounded-xl border backdrop-blur-sm shadow-xl transition-all duration-200 min-w-[150px] text-center select-none ${diffStatus ? getDiffNodeStyle(diffStatus) : getLangStyles(data.language)} ${!diffStatus ? highlightClass : ""} ${isOrphan && !diffStatus ? "border-dashed" : ""}
+      className={`px-4 py-3 rounded-xl border backdrop-blur-sm shadow-xl transition-all duration-200 min-w-[150px] text-center select-none ${diffStatus ? getDiffNodeStyle(diffStatus) : getLangStyles(data.language)} ${!diffStatus ? highlightClass : ""} ${isOrphan && !diffStatus ? "border-dashed" : ""}`}
     >
       <Handle
         type="target"
