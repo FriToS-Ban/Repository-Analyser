@@ -7,19 +7,20 @@ An interactive tool that parses a local Git repository, builds a visual dependen
 ```text
 repo-analyser/
 ├── backend/
-│   ├── main.py            # FastAPI app, routing, NIM connection
-│   ├── parser.py          # Python AST & JS/TS regex dependency parser
-│   ├── cache.py           # SQLite caching for file summaries
+│   ├── main.py            # FastAPI app, routes, NIM integration
+│   ├── repo_parser.py     # filesystem and git-ref dependency parser
+│   ├── cache.py           # SQLite cache for AI summaries
+│   ├── cache.db           # local SQLite cache file (auto-created)
 │   └── requirements.txt
 ├── frontend/
 │   ├── src/
-│   │   ├── components/
-│   │   │   ├── Graph.tsx           # React Flow container
-│   │   │   ├── FileNode.tsx        # Custom language-styled nodes
-│   │   │   ├── FolderGroupNode.tsx # Folder-cluster container nodes
-│   │   │   └── SidePanel.tsx       # Detailed info, AI summaries, copy to clipboard
 │   │   ├── App.tsx
-│   │   └── main.tsx
+│   │   ├── main.tsx
+│   │   ├── components/
+│   │   │   ├── Graph.tsx
+│   │   │   ├── FileNode.tsx
+│   │   │   ├── FolderGroupNode.tsx
+│   │   │   └── SidePanel.tsx
 │   ├── index.html
 │   ├── package.json
 │   └── vite.config.ts
@@ -36,43 +37,104 @@ repo-analyser/
 
 ### 1. Running the Backend
 
-Navigate to the `backend` directory, install python packages, and start the development server:
-
 ```bash
-cd backend
+cd repo-analyser/backend
 pip install -r requirements.txt
 
-# On Windows (PowerShell)
+# Windows PowerShell
 $env:NVIDIA_API_KEY="your_api_key_here"
 uvicorn main:app --reload --port 8000
 
-# On Linux/macOS
+# Linux/macOS
 NVIDIA_API_KEY="your_api_key_here" uvicorn main:app --reload --port 8000
 ```
 
-*Note: If `NVIDIA_API_KEY` is not provided, the backend falls back to generating a mock placeholder summary for local testing.*
-
 ### 2. Running the Frontend
 
-Navigate to the `frontend` directory, install node modules, and spin up the Vite development server:
-
 ```bash
-cd frontend
+cd repo-analyser/frontend
 npm install
 npm run dev
 ```
 
 Open [http://localhost:5173](http://localhost:5173) in your browser.
 
-## Features
+> If `NVIDIA_API_KEY` is not set, the backend returns a local placeholder summary so the UI remains usable during development.
 
-- **Folder-Based Clustering**: Group files by their parent directories visually into containers. Columns are sorted by average dependency depth, resulting in a cleaner, cluster-based mental model.
-- **Circular Dependency Detection**: Custom iterative Tarjan's Strongly Connected Components (SCC) algorithm detects cyclic loops. Circular dependency edges are highlighted in **Red** with increased stroke thickness.
-- **HD Image Export**: One-click **Export as PNG** functionality using `html-to-image`. Hides controls, minimaps, and overlay panels temporarily during generation for a clean export at `pixelRatio: 2`.
-- **Live Language Filters**: Interactive pills to highlight specific languages (Python, TS, JS, etc.) dynamically, fading out other nodes.
-- **Repository Statistics**: Header dashboard displaying total analyzed files, cumulative lines of code (LOC), and a relative percentage breakdown of the codebase languages.
-- **AST-Based Parsing**: Resolves Python `import` statements natively using Python's `ast` library.
-- **Regex Parsing**: Resolves relative JavaScript and TypeScript (`.js`, `.jsx`, `.ts`, `.tsx`) imports and dynamic requires.
-- **AI File Summaries**: One-click AI explanation queries using NVIDIA NIM `meta/llama-3.1-8b-instruct` with a "Copy Summary" clipboard helper in the side panel.
-- **SQLite Performance Caching**: Fast reload on cached file hashes so that identical files don't cost API credits or cause lag.
+## Backend Overview
+
+### API Routes
+
+- `GET /api/graph?path=<absolute_repo_path>`
+  - Parses the repository filesystem and returns `nodes` + `edges`.
+- `POST /api/summarise`
+  - Body: `{ "file_path": str, "repo_path": str }`
+  - Returns a cached or live AI summary for the selected file.
+- `GET /api/refs?path=<absolute_repo_path>`
+  - Returns local Git branches and recent commits for the diff selector.
+- `GET /api/diff?path=<absolute_repo_path>&base=<ref>&head=<ref>`
+  - Returns node/edge diff status between two Git refs.
+
+### Backend Implementation
+
+- `backend/repo_parser.py` walks the repository tree while skipping `node_modules`, `.git`, `__pycache__`, `dist`, `build`, `.venv`, `venv`, `.idea`, and `.vscode`.
+- Python dependencies are extracted using `ast` and resolved only if they map to files inside the repo.
+- JS/TS dependencies are extracted using regex for relative imports (`./` / `../`) and dynamic `require(...)` / `import(...)` paths.
+- `backend/cache.py` uses SQLite to cache summaries by file path and content hash.
+
+## Frontend Overview
+
+- `frontend/src/App.tsx` accepts an absolute local repo path and loads the graph from `/api/graph`.
+- `frontend/src/components/Graph.tsx` renders React Flow nodes and edges with:
+  - folder grouping,
+  - minimap,
+  - fit-to-view,
+  - language filters,
+  - search,
+  - PNG export,
+  - circular dependency highlighting,
+  - diff-mode edge styling.
+- `frontend/src/components/SidePanel.tsx` slides in on node click and displays:
+  - full file path,
+  - language,
+  - lines of code,
+  - AI summary,
+  - copy-to-clipboard button,
+  - loading state.
+
+## Key Features
+
+- Language-colored graph nodes for Python, JavaScript, TypeScript, and other supported file types.
+- Line-of-code metadata per node.
+- Click a file node to load an AI-generated explanation from NVIDIA NIM.
+- Local SQLite caching so unchanged files reuse previously generated summaries.
+- Git diff mode with branch/commit selectors and added/removed/changed highlights.
+- Export the graph canvas as a PNG image.
+- Search file names and filter by language.
+
+## Dependencies
+
+### Backend
+
+- `fastapi`
+- `uvicorn[standard]`
+- `openai`
+- `pydantic`
+
+### Frontend
+
+- `react`
+- `react-dom`
+- `reactflow`
+- `lucide-react`
+- `html-to-image`
+- `vite`
+- `typescript`
+- `tailwindcss`
+
+## Notes
+
+- The frontend expects the backend at `http://localhost:8000`.
+- The backend reads `NVIDIA_API_KEY` from the environment to call NVIDIA NIM via the OpenAI-compatible SDK.
+- Files larger than 500KB are not summarised by AI and return a friendly message instead.
 
