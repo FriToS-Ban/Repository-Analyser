@@ -24,6 +24,12 @@ class SummariseRequest(BaseModel):
     repo_path: str
 
 
+class RefactorRequest(BaseModel):
+    file_path: str
+    repo_path: str
+    fan_in: int
+
+
 # ---------------------------------------------------------------------------
 # Existing endpoints (unchanged)
 # ---------------------------------------------------------------------------
@@ -93,6 +99,105 @@ def summarise_file(request: SummariseRequest):
         
         return {"summary": summary, "cached": False}
         
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# New: /api/refactor-suggest — LLM suggestions for high fan-in bottleneck files
+# ---------------------------------------------------------------------------
+
+@app.post("/api/refactor-suggest")
+def refactor_suggest(request: RefactorRequest):
+    """
+    For a file flagged as a high fan-in bottleneck, asks the LLM to suggest
+    concrete ways to split its responsibilities into smaller, focused modules.
+    Returns a list of actionable refactor suggestions.
+    """
+    repo_abs = os.path.abspath(request.repo_path)
+    file_abs = os.path.abspath(os.path.join(repo_abs, request.file_path))
+
+    if os.path.commonpath([repo_abs, file_abs]) != repo_abs:
+        raise HTTPException(status_code=400, detail="Invalid file_path: must be inside repo_path.")
+
+    if not os.path.exists(file_abs):
+        raise HTTPException(status_code=404, detail=f"File {request.file_path} not found.")
+
+    try:
+        if os.path.getsize(file_abs) > 500_000:
+            return {"suggestions": ["File is too large to analyse. Consider splitting it manually into smaller modules."], "cached": False}
+
+        with open(file_abs, "r", encoding="utf-8", errors="ignore") as f:
+            content = f.read()
+
+        max_chars = 1500 * 4
+        if len(content) > max_chars:
+            content = content[:max_chars] + "\n[TRUNCATED]..."
+
+        content_hash = hashlib.sha256((content + str(request.fan_in)).encode("utf-8")).hexdigest()
+        cache_key = f"refactor:{request.file_path}"
+
+        cached = cache.get_summary(cache_key, content_hash)
+        if cached:
+            import json as _json
+            try:
+                return {"suggestions": _json.loads(cached), "cached": True}
+            except Exception:
+                return {"suggestions": [cached], "cached": True}
+
+        api_key = os.environ.get("NVIDIA_API_KEY")
+        if not api_key:
+            mock = [
+                f"{request.file_path} is imported by {request.fan_in} other files, making it a central bottleneck.",
+                "Consider extracting utility/helper functions into a separate `utils` module.",
+                "Group domain-specific logic into dedicated submodules to reduce coupling.",
+                "Set the NVIDIA_API_KEY environment variable to get live AI-powered refactor suggestions.",
+            ]
+            import json as _json
+            cache.set_summary(cache_key, content_hash, _json.dumps(mock))
+            return {"suggestions": mock, "cached": False}
+
+        client = OpenAI(
+            base_url="https://integrate.api.nvidia.com/v1",
+            api_key=api_key
+        )
+
+        prompt = (
+            f"You are a senior software architect reviewing a codebase dependency graph.\n"
+            f"The file `{request.file_path}` is a HIGH FAN-IN BOTTLENECK — it is imported by "
+            f"{request.fan_in} other files, making it a central coupling point in the codebase.\n\n"
+            f"Analyse the code below and suggest exactly 3-5 concrete, actionable ways to split its "
+            f"responsibilities into smaller, focused modules. Each suggestion should:\n"
+            f"- Name a specific new module/file that could be extracted (e.g. `auth_utils.py`, `types.ts`)\n"
+            f"- Describe what logic should move into it (1-2 sentences)\n"
+            f"- Explain how this reduces fan-in coupling\n\n"
+            f"Respond as a JSON array of strings, one suggestion per element. No preamble, no markdown fences.\n\n"
+            f"File: {request.file_path}\n\n{content}"
+        )
+
+        response = client.chat.completions.create(
+            model="meta/llama-3.1-8b-instruct",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=500,
+        )
+
+        raw = response.choices[0].message.content.strip()
+
+        import json as _json
+        try:
+            suggestions = _json.loads(raw)
+            if not isinstance(suggestions, list):
+                raise ValueError("not a list")
+        except Exception:
+            # Fallback: split by newline/numbering if the model didn't return JSON
+            import re
+            suggestions = [s.strip().lstrip("0123456789.-) ") for s in re.split(r"\n+", raw) if s.strip()]
+
+        cache.set_summary(cache_key, content_hash, _json.dumps(suggestions))
+        return {"suggestions": suggestions, "cached": False}
+
     except Exception as e:
         import traceback
         traceback.print_exc()

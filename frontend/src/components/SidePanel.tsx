@@ -1,5 +1,7 @@
-import React, { useState } from "react";
-import { X, FileCode, Hash, MessageSquare, Terminal, Copy, Check } from "lucide-react";
+import React, { useState, useEffect, useRef } from "react";
+import { X, FileCode, Hash, MessageSquare, Terminal, Copy, Check, GitFork, Loader2, AlertTriangle, ChevronDown, ChevronUp } from "lucide-react";
+
+const FAN_IN_THRESHOLD = 3;
 
 interface SidePanelProps {
   isOpen: boolean;
@@ -8,9 +10,12 @@ interface SidePanelProps {
     path: string;
     language: string;
     loc: number;
+    fanIn: number;
   } | null;
   summary: string | null;
   loading: boolean;
+  repoPath: string;
+  apiBaseUrl: string;
 }
 
 export const SidePanel: React.FC<SidePanelProps> = ({
@@ -19,11 +24,63 @@ export const SidePanel: React.FC<SidePanelProps> = ({
   fileInfo,
   summary,
   loading,
+  repoPath,
+  apiBaseUrl,
 }) => {
-  // ✅ FIX: useState must be called unconditionally — hooks cannot appear after an early return.
-  // Previously `useState` was placed after `if (!fileInfo) return null`, which is a Rules of Hooks
-  // violation that causes React to crash with "Rendered fewer hooks than expected".
   const [copied, setCopied] = useState(false);
+
+  // Refactor suggestions state
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
+  const [suggestionsError, setSuggestionsError] = useState<string | null>(null);
+  const [suggestionsExpanded, setSuggestionsExpanded] = useState(true);
+  const [suggestionsCached, setSuggestionsCached] = useState(false);
+
+  // Track which file we last fetched suggestions for to avoid duplicate calls
+  const lastFetchedRef = useRef<string | null>(null);
+
+  const isBottleneck = (fileInfo?.fanIn ?? 0) >= FAN_IN_THRESHOLD;
+
+  useEffect(() => {
+    if (!fileInfo || !isBottleneck) {
+      setSuggestions([]);
+      setSuggestionsError(null);
+      lastFetchedRef.current = null;
+      return;
+    }
+
+    // Don't re-fetch if we already loaded suggestions for this exact file
+    if (lastFetchedRef.current === fileInfo.path) return;
+    lastFetchedRef.current = fileInfo.path;
+
+    setSuggestions([]);
+    setSuggestionsError(null);
+    setLoadingSuggestions(true);
+    setSuggestionsExpanded(true);
+
+    fetch(`${apiBaseUrl}/api/refactor-suggest`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        file_path: fileInfo.path,
+        repo_path: repoPath,
+        fan_in: fileInfo.fanIn,
+      }),
+    })
+      .then(async (res) => {
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.detail || "Failed to load refactor suggestions.");
+        }
+        return res.json();
+      })
+      .then((data) => {
+        setSuggestions(data.suggestions ?? []);
+        setSuggestionsCached(data.cached ?? false);
+      })
+      .catch((err) => setSuggestionsError(err.message))
+      .finally(() => setLoadingSuggestions(false));
+  }, [fileInfo, isBottleneck, repoPath, apiBaseUrl]);
 
   if (!fileInfo) return null;
 
@@ -34,7 +91,6 @@ export const SidePanel: React.FC<SidePanelProps> = ({
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
-      // fallback for non-secure contexts
       const ta = document.createElement("textarea");
       ta.value = summary;
       document.body.appendChild(ta);
@@ -109,6 +165,17 @@ export const SidePanel: React.FC<SidePanelProps> = ({
           </div>
         </div>
 
+        {/* Fan-in bottleneck badge */}
+        {isBottleneck && (
+          <div className="flex items-center gap-2 px-3 py-2 bg-amber-950/30 border border-amber-500/30 rounded-lg">
+            <AlertTriangle className="h-4 w-4 text-amber-400 shrink-0" />
+            <span className="text-xs text-amber-300 font-medium">
+              High fan-in bottleneck —{" "}
+              <span className="font-bold">{fileInfo.fanIn} files</span> import this module
+            </span>
+          </div>
+        )}
+
         {/* Summary */}
         <div className="space-y-2 border-t border-slate-800/60 pt-6">
           <div className="flex items-center justify-between">
@@ -148,6 +215,54 @@ export const SidePanel: React.FC<SidePanelProps> = ({
             </div>
           )}
         </div>
+
+        {/* Refactor Suggestions — only shown for bottleneck files */}
+        {isBottleneck && (
+          <div className="space-y-3 border-t border-amber-500/20 pt-6">
+            {/* Section header */}
+            <button
+              onClick={() => setSuggestionsExpanded((v) => !v)}
+              className="w-full flex items-center justify-between group cursor-pointer"
+            >
+              <h4 className="text-xs font-semibold text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
+                <GitFork className="h-4 w-4" /> Refactor Suggestions
+                {suggestionsCached && (
+                  <span className="ml-1 text-[9px] font-normal text-slate-500 normal-case tracking-normal">(cached)</span>
+                )}
+              </h4>
+              <span className="text-slate-500 group-hover:text-slate-300 transition-colors">
+                {suggestionsExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+              </span>
+            </button>
+
+            {suggestionsExpanded && (
+              <>
+                {loadingSuggestions ? (
+                  <div className="flex items-center gap-3 py-6 justify-center">
+                    <Loader2 className="h-5 w-5 text-amber-400 animate-spin" />
+                    <span className="text-xs text-slate-400">Analysing responsibilities...</span>
+                  </div>
+                ) : suggestionsError ? (
+                  <div className="flex items-start gap-2 p-3 bg-red-950/20 border border-red-500/20 rounded-lg">
+                    <AlertTriangle className="h-4 w-4 text-red-400 shrink-0 mt-0.5" />
+                    <p className="text-xs text-red-400 font-mono">{suggestionsError}</p>
+                  </div>
+                ) : suggestions.length > 0 ? (
+                  <ol className="space-y-2">
+                    {suggestions.map((s, i) => (
+                      <li key={i} className="flex gap-3 p-3 bg-amber-950/10 border border-amber-500/15 rounded-lg hover:border-amber-500/30 transition-colors">
+                        <span className="shrink-0 w-5 h-5 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-400 text-[10px] font-bold flex items-center justify-center">
+                          {i + 1}
+                        </span>
+                        <p className="text-xs text-slate-300 leading-relaxed">{s}</p>
+                      </li>
+                    ))}
+                  </ol>
+                ) : null}
+              </>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

@@ -25,6 +25,7 @@ interface FileDetails {
   path: string;
   language: string;
   loc: number;
+  fanIn: number;
 }
 
 interface DiffNode {
@@ -68,7 +69,6 @@ function App() {
   const [diffError, setDiffError] = useState<string | null>(null);
   const [gitRefs, setGitRefs] = useState<GitRefs | null>(null);
 
-  // SidePanel state
   const [selectedFile, setSelectedFile] = useState<FileDetails | null>(null);
   const [summary, setSummary] = useState<string | null>(null);
   const [loadingSummary, setLoadingSummary] = useState(false);
@@ -416,6 +416,8 @@ function App() {
           fileInfo={selectedFile}
           summary={summary}
           loading={loadingSummary}
+          repoPath={repoPath.trim()}
+          apiBaseUrl={API_BASE_URL}
         />
       </main>
     </div>

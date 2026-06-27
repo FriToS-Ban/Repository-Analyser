@@ -30,8 +30,8 @@ interface GraphEdge {
 
 interface GraphProps {
   data: { nodes: GraphNode[]; edges: GraphEdge[]; };
-  selectedFile: { path: string; language: string; loc: number } | null;
-  onSelectFile: (file: { path: string; language: string; loc: number } | null) => void;
+  selectedFile: { path: string; language: string; loc: number; fanIn: number } | null;
+  onSelectFile: (file: { path: string; language: string; loc: number; fanIn: number } | null) => void;
   diffMode?: boolean;
 }
 
@@ -557,7 +557,12 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, selectedFile, onSelectFile, d
 
   const onNodeClick = (_event: React.MouseEvent, node: any) => {
     if (node.data.isFolder) return;
-    onSelectFile({ path: node.data.id, language: node.data.language, loc: node.data.loc });
+    onSelectFile({
+      path: node.data.id,
+      language: node.data.language,
+      loc: node.data.loc,
+      fanIn: node.data.incomingEdges || 0,
+    });
   };
 
   return (
@@ -601,7 +606,12 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, selectedFile, onSelectFile, d
                         if (parentRfn) { cx += parentRfn.position.x; cy += parentRfn.position.y; }
                       }
                       setCenter(cx, cy, { zoom: 1.2, duration: 800 });
-                      onSelectFile({ path: node.id, language: node.language, loc: node.loc });
+                      onSelectFile({
+                        path: node.id,
+                        language: node.language,
+                        loc: node.loc,
+                        fanIn: incomingEdgeCounts[node.id] || 0,
+                      });
                     }
                   }}
                   className="w-full text-left p-2.5 rounded-lg border border-transparent hover:border-slate-800 hover:bg-slate-900/50 transition-all group flex items-start justify-between cursor-pointer"
