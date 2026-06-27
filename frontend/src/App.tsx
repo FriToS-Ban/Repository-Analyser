@@ -61,7 +61,9 @@ function App() {
   const [loadingGraph, setLoadingGraph] = useState(false);
   const [graphError, setGraphError] = useState<string | null>(null);
   const [graphData, setGraphData] = useState<GraphData | null>(null);
-  const wsRef = useRef<WebSocket | null>(null);
+  const wsRef  = useRef<WebSocket | null>(null);
+  const pollRef = useRef<number | null>(null);
+  const [parseProgress, setParseProgress] = useState<{ done: number; total: number } | null>(null);
 
   const [diffMode, setDiffMode] = useState(false);
   const [baseRef, setBaseRef] = useState("");
@@ -107,41 +109,64 @@ function App() {
     e.preventDefault();
     if (!repoPath.trim()) return;
 
-    // Close any existing live-watch connection before starting a new one
-    if (wsRef.current) {
-      wsRef.current.onmessage = null;
-      wsRef.current.close();
-      wsRef.current = null;
-    }
+    // Tear down any existing poll + WS before starting fresh
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+    if (wsRef.current) { wsRef.current.onmessage = null; wsRef.current.close(); wsRef.current = null; }
 
     setLoadingGraph(true);
     setGraphError(null);
     setSelectedFile(null);
     setSidePanelOpen(false);
+    setParseProgress(null);
 
     try {
-      const response = await fetch(
-        `${API_BASE_URL}/api/graph?path=${encodeURIComponent(repoPath.trim())}`
+      // 1. Enqueue the background parse job
+      const startRes = await fetch(
+        `${API_BASE_URL}/api/graph/start?path=${encodeURIComponent(repoPath.trim())}`,
+        { method: "POST" }
       );
-      if (!response.ok) {
-        const errData = await response.json();
-        throw new Error(errData.detail || "Failed to fetch repository graph.");
+      if (!startRes.ok) {
+        const errData = await startRes.json();
+        throw new Error(errData.detail || "Failed to start graph job.");
       }
-      const data: GraphData = await response.json();
+      const { job_id } = await startRes.json();
+
+      // 2. Poll until done
+      const data: GraphData = await new Promise((resolve, reject) => {
+        pollRef.current = window.setInterval(async () => {
+          try {
+            const statusRes = await fetch(`${API_BASE_URL}/api/graph/status/${job_id}`);
+            if (!statusRes.ok) {
+              clearInterval(pollRef.current!); pollRef.current = null;
+              reject(new Error("Failed to poll job status."));
+              return;
+            }
+            const job = await statusRes.json();
+            if (job.total > 0) setParseProgress({ done: job.progress, total: job.total });
+            if (job.status === "done") {
+              clearInterval(pollRef.current!); pollRef.current = null;
+              resolve(job.result);
+            } else if (job.status === "error") {
+              clearInterval(pollRef.current!); pollRef.current = null;
+              reject(new Error(job.error || "Parse job failed."));
+            }
+          } catch (err) {
+            clearInterval(pollRef.current!); pollRef.current = null;
+            reject(err);
+          }
+        }, 500);
+      });
+
       setGraphData(data);
       handleFetchRefs(repoPath.trim());
 
-      // Open live-watch WebSocket
+      // 3. Open live-watch WebSocket
       const ws = new WebSocket(`${WS_BASE_URL}/ws/watch?path=${encodeURIComponent(repoPath.trim())}`);
       ws.onmessage = (event) => {
         try {
           const msg = JSON.parse(event.data);
-          if (msg.type === "graph_update") {
-            setGraphData({ nodes: msg.nodes, edges: msg.edges });
-          }
-        } catch {
-          // ignore malformed frames
-        }
+          if (msg.type === "graph_update") setGraphData({ nodes: msg.nodes, edges: msg.edges });
+        } catch { /* ignore malformed frames */ }
       };
       wsRef.current = ws;
     } catch (err: any) {
@@ -149,6 +174,7 @@ function App() {
       setGraphData(null);
     } finally {
       setLoadingGraph(false);
+      setParseProgress(null);
     }
   };
 
@@ -305,6 +331,21 @@ function App() {
             </div>
           )}
         </div>
+
+        {/* Progress bar — visible while a background parse job is running */}
+        {loadingGraph && parseProgress && parseProgress.total > 0 && (
+          <div className="px-6 pb-2 flex items-center gap-3 animate-[fadeIn_0.3s_ease-out]">
+            <div className="flex-1 bg-slate-800 rounded-full h-1 overflow-hidden">
+              <div
+                className="h-full bg-indigo-500 rounded-full transition-all duration-300"
+                style={{ width: `${Math.round((parseProgress.done / parseProgress.total) * 100)}%` }}
+              />
+            </div>
+            <span className="text-[10px] font-mono text-slate-500 shrink-0">
+              {parseProgress.done}/{parseProgress.total} files
+            </span>
+          </div>
+        )}
 
         {/* Stats strip — visible only after a successful analysis */}
         {repoStats && (

@@ -201,7 +201,7 @@ def _resolve_js_ts_deps(
 # Filesystem-based parse (original behaviour)
 # ---------------------------------------------------------------------------
 
-def parse_repo(root_path: str) -> dict:
+def parse_repo(root_path: str, progress_callback=None) -> dict:
     import hashlib
     root_path = os.path.abspath(root_path)
     if not os.path.exists(root_path):
@@ -228,11 +228,12 @@ def parse_repo(root_path: str) -> dict:
                 "ext": ext.lower(),
             })
 
+    total = len(all_files)
     rel_path_set = {f["rel_path"] for f in all_files}
     nodes = []
     edges = []
 
-    for f_info in all_files:
+    for done, f_info in enumerate(all_files, start=1):
         rel_path  = f_info["rel_path"]
         full_path = f_info["full_path"]
         lang      = get_language(f_info["ext"])
@@ -271,7 +272,11 @@ def parse_repo(root_path: str) -> dict:
         for dep in deps:
             edges.append({"source": rel_path, "target": dep})
 
+        if progress_callback:
+            progress_callback(done, total)
+
     return {"nodes": nodes, "edges": edges}
+
 
 
 

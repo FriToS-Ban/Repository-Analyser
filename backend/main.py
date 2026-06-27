@@ -2,6 +2,8 @@ import os
 import asyncio
 import hashlib
 import threading
+import uuid
+from concurrent.futures import ThreadPoolExecutor
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -11,6 +13,12 @@ from repo_parser import parse_repo, parse_repo_at_ref, diff_graphs
 import cache
 
 app = FastAPI(title="Repository Structure Analysis & Visualisation System")
+
+# Thread pool for background parse jobs (avoids blocking the async event loop)
+_executor = ThreadPoolExecutor(max_workers=4)
+# job_id -> {status, progress, total, result, error}
+_jobs: dict[str, dict] = {}
+_jobs_lock = threading.Lock()
 
 # Enable CORS for frontend communications
 app.add_middleware(
@@ -141,6 +149,71 @@ def repo_summary(request: RepoSummaryRequest):
     cache.set_summary(cache_key, content_hash, summary_text)
     return {"summary": summary_text, "cached": False}
 
+
+# ---------------------------------------------------------------------------
+# Background job queue: /api/graph/start  +  /api/graph/status/{job_id}
+# ---------------------------------------------------------------------------
+
+@app.post("/api/graph/start")
+def start_graph_job(path: str = Query(..., description="Absolute path of the Git repository")):
+    """
+    Enqueues a parse_repo call in the thread pool and returns a job_id
+    immediately. Poll /api/graph/status/{job_id} for progress and result.
+    """
+    abs_path = os.path.abspath(path)
+    if not os.path.exists(abs_path):
+        raise HTTPException(status_code=404, detail="Repository path not found.")
+
+    job_id = str(uuid.uuid4())
+    with _jobs_lock:
+        _jobs[job_id] = {"status": "running", "progress": 0, "total": 0,
+                         "result": None, "error": None}
+
+    def _progress(done: int, total: int):
+        with _jobs_lock:
+            if job_id in _jobs:
+                _jobs[job_id]["progress"] = done
+                _jobs[job_id]["total"] = total
+
+    def _run():
+        try:
+            result = parse_repo(abs_path, progress_callback=_progress)
+            with _jobs_lock:
+                if job_id in _jobs:
+                    _jobs[job_id]["status"] = "done"
+                    _jobs[job_id]["result"] = result
+        except Exception as exc:
+            with _jobs_lock:
+                if job_id in _jobs:
+                    _jobs[job_id]["status"] = "error"
+                    _jobs[job_id]["error"] = str(exc)
+
+    _executor.submit(_run)
+    return {"job_id": job_id}
+
+
+@app.get("/api/graph/status/{job_id}")
+def graph_job_status(job_id: str):
+    """Poll this endpoint after /api/graph/start to track progress and retrieve the result."""
+    with _jobs_lock:
+        job = _jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found or already delivered.")
+
+    resp: dict = {"status": job["status"],
+                  "progress": job["progress"],
+                  "total": job["total"]}
+
+    if job["status"] == "done":
+        resp["result"] = job["result"]
+        with _jobs_lock:
+            _jobs.pop(job_id, None)  # free memory after delivery
+    elif job["status"] == "error":
+        resp["error"] = job["error"]
+        with _jobs_lock:
+            _jobs.pop(job_id, None)
+
+    return resp
 
 
 
