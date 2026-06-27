@@ -1,9 +1,10 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef } from "react";
 import { FolderGit2, Play, AlertCircle, FileCode2, Hash, GitCompare, BookOpen, X, Loader2 } from "lucide-react";
 import { Graph } from "./components/Graph";
 import { SidePanel } from "./components/SidePanel";
 
 const API_BASE_URL = "http://localhost:8000";
+const WS_BASE_URL  = "ws://localhost:8000";
 
 interface GraphNode {
   id: string;
@@ -60,6 +61,7 @@ function App() {
   const [loadingGraph, setLoadingGraph] = useState(false);
   const [graphError, setGraphError] = useState<string | null>(null);
   const [graphData, setGraphData] = useState<GraphData | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
 
   const [diffMode, setDiffMode] = useState(false);
   const [baseRef, setBaseRef] = useState("");
@@ -105,6 +107,13 @@ function App() {
     e.preventDefault();
     if (!repoPath.trim()) return;
 
+    // Close any existing live-watch connection before starting a new one
+    if (wsRef.current) {
+      wsRef.current.onmessage = null;
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+
     setLoadingGraph(true);
     setGraphError(null);
     setSelectedFile(null);
@@ -121,6 +130,20 @@ function App() {
       const data: GraphData = await response.json();
       setGraphData(data);
       handleFetchRefs(repoPath.trim());
+
+      // Open live-watch WebSocket
+      const ws = new WebSocket(`${WS_BASE_URL}/ws/watch?path=${encodeURIComponent(repoPath.trim())}`);
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type === "graph_update") {
+            setGraphData({ nodes: msg.nodes, edges: msg.edges });
+          }
+        } catch {
+          // ignore malformed frames
+        }
+      };
+      wsRef.current = ws;
     } catch (err: any) {
       setGraphError(err.message || "An unexpected error occurred.");
       setGraphData(null);

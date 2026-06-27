@@ -1,6 +1,8 @@
 import os
+import asyncio
 import hashlib
-from fastapi import FastAPI, HTTPException, Query
+import threading
+from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from openai import OpenAI
@@ -417,3 +419,68 @@ def get_diff(
         raise HTTPException(status_code=500, detail=f"Diff computation failed: {e}")
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# WebSocket: /ws/watch — live graph updates via watchdog
+# ---------------------------------------------------------------------------
+
+@app.websocket("/ws/watch")
+async def watch_repo(websocket: WebSocket, path: str = Query(...)):
+    """
+    Watches a repository directory with watchdog and pushes the updated
+    dependency graph over the WebSocket whenever any source file changes.
+    The parse is incremental (via the parse_cache), so updates are fast.
+    """
+    abs_path = os.path.abspath(path)
+    if not os.path.exists(abs_path):
+        await websocket.close(code=1008)
+        return
+
+    await websocket.accept()
+
+    loop = asyncio.get_running_loop()
+    queue: asyncio.Queue = asyncio.Queue()
+
+    from watchdog.observers import Observer
+    from watchdog.events import FileSystemEventHandler
+
+    class _ChangeHandler(FileSystemEventHandler):
+        """Debounces rapid successive file-system events into a single queue put."""
+        def __init__(self):
+            self._timer: threading.Timer | None = None
+            self._lock = threading.Lock()
+
+        def _schedule(self):
+            with self._lock:
+                if self._timer:
+                    self._timer.cancel()
+                self._timer = threading.Timer(0.4, self._fire)
+                self._timer.daemon = True
+                self._timer.start()
+
+        def _fire(self):
+            asyncio.run_coroutine_threadsafe(queue.put(True), loop)
+
+        def on_any_event(self, event):
+            if not event.is_directory:
+                self._schedule()
+
+    handler = _ChangeHandler()
+    observer = Observer()
+    observer.schedule(handler, abs_path, recursive=True)
+    observer.start()
+
+    try:
+        while True:
+            await queue.get()
+            try:
+                graph_data = parse_repo(abs_path)
+                await websocket.send_json({"type": "graph_update", **graph_data})
+            except Exception as exc:
+                print(f"[ws/watch] parse error: {exc}")
+    except WebSocketDisconnect:
+        pass
+    finally:
+        observer.stop()
+        observer.join()
