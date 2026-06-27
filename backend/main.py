@@ -30,9 +30,117 @@ class RefactorRequest(BaseModel):
     fan_in: int
 
 
+class RepoSummaryRequest(BaseModel):
+    repo_path: str
+
+
 # ---------------------------------------------------------------------------
-# Existing endpoints (unchanged)
+# New: /api/repo-summary — architectural overview of the entire repository
 # ---------------------------------------------------------------------------
+
+@app.post("/api/repo-summary")
+def repo_summary(request: RepoSummaryRequest):
+    """
+    Sends the full dependency graph + excerpts from the most-imported and
+    largest files to the LLM and returns a plain-English architectural overview.
+    """
+    repo_abs = os.path.abspath(request.repo_path)
+    if not os.path.exists(repo_abs):
+        raise HTTPException(status_code=404, detail="Repository path not found.")
+
+    try:
+        graph_data = parse_repo(repo_abs)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to parse repository: {e}")
+
+    nodes = graph_data.get("nodes", [])
+    edges = graph_data.get("edges", [])
+
+    if not nodes:
+        return {"summary": "The repository appears to be empty or contains no supported source files.", "cached": False}
+
+    # Build fan-in counts
+    fan_in: dict[str, int] = {n["id"]: 0 for n in nodes}
+    for e in edges:
+        if e["target"] in fan_in:
+            fan_in[e["target"]] += 1
+
+    # Pick top files: highest fan-in + highest LOC, up to 15 total
+    by_fan_in = sorted(nodes, key=lambda n: fan_in[n["id"]], reverse=True)[:10]
+    by_loc    = sorted(nodes, key=lambda n: n.get("loc", 0), reverse=True)[:5]
+    top_files: list[dict] = list({n["id"]: n for n in by_fan_in + by_loc}.values())[:15]
+
+    # Build a compact dependency map string (source -> targets)
+    dep_lines: list[str] = []
+    adj: dict[str, list[str]] = {n["id"]: [] for n in nodes}
+    for e in edges:
+        if e["source"] in adj:
+            adj[e["source"]].append(e["target"])
+    for src, tgts in adj.items():
+        if tgts:
+            dep_lines.append(f"  {src} -> {', '.join(tgts)}")
+    dep_map = "\n".join(dep_lines[:80])  # cap to avoid token overflow
+
+    # Read file excerpts
+    file_excerpts: list[str] = []
+    for node in top_files:
+        file_abs = os.path.join(repo_abs, node["id"])
+        try:
+            with open(file_abs, "r", encoding="utf-8", errors="ignore") as f:
+                content = f.read(2000)  # first 2 000 chars per file
+            file_excerpts.append(
+                f"### {node['id']} ({node.get('language','?')}, {fan_in[node['id']]} imports, {node.get('loc',0)} LOC)\n{content}\n"
+            )
+        except Exception:
+            pass
+
+    # Cache key: repo path + number of nodes (cheap proxy for graph version)
+    cache_key = f"repo-summary:{repo_abs}"
+    content_hash = hashlib.sha256(f"{len(nodes)}{len(edges)}".encode()).hexdigest()
+    cached = cache.get_summary(cache_key, content_hash)
+    if cached:
+        return {"summary": cached, "cached": True}
+
+    api_key = os.environ.get("NVIDIA_API_KEY")
+    if not api_key:
+        mock = (
+            f"Repository overview (placeholder — set NVIDIA_API_KEY for live analysis):\n\n"
+            f"This repository contains {len(nodes)} source files and {len(edges)} dependency edges "
+            f"spanning {len(set(n.get('language','?') for n in nodes))} language(s). "
+            f"The most-imported files are: "
+            f"{', '.join(n['id'] for n in by_fan_in[:5])}."
+        )
+        cache.set_summary(cache_key, content_hash, mock)
+        return {"summary": mock, "cached": False}
+
+    client = OpenAI(base_url="https://integrate.api.nvidia.com/v1", api_key=api_key)
+
+    prompt = (
+        "You are a senior software architect. Below is the dependency graph and key file excerpts "
+        "from a source-code repository. Write a concise architectural overview (5-8 sentences) that explains:\n"
+        "1. What the repository does at a high level\n"
+        "2. How it is structured (key modules / layers)\n"
+        "3. Which files are central bottlenecks and why\n"
+        "4. Any notable patterns (e.g. MVC, service-layer, plugin system)\n\n"
+        f"=== Dependency graph ({len(nodes)} files, {len(edges)} edges) ===\n{dep_map}\n\n"
+        f"=== Key file excerpts ===\n{''.join(file_excerpts)}"
+    )
+
+    try:
+        response = client.chat.completions.create(
+            model="meta/llama-3.1-8b-instruct",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=400,
+        )
+        summary_text = response.choices[0].message.content.strip()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"LLM call failed: {e}")
+
+    cache.set_summary(cache_key, content_hash, summary_text)
+    return {"summary": summary_text, "cached": False}
+
+
+
 
 @app.get("/api/graph")
 def get_graph(path: str = Query(..., description="Absolute path of the Git repository")):

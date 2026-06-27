@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { FolderGit2, Play, AlertCircle, FileCode2, Hash, GitCompare } from "lucide-react";
+import { FolderGit2, Play, AlertCircle, FileCode2, Hash, GitCompare, BookOpen, X, Loader2 } from "lucide-react";
 import { Graph } from "./components/Graph";
 import { SidePanel } from "./components/SidePanel";
 
@@ -73,6 +73,33 @@ function App() {
   const [summary, setSummary] = useState<string | null>(null);
   const [loadingSummary, setLoadingSummary] = useState(false);
   const [sidePanelOpen, setSidePanelOpen] = useState(false);
+
+  const [repoSummary, setRepoSummary] = useState<string | null>(null);
+  const [loadingRepoSummary, setLoadingRepoSummary] = useState(false);
+  const [showRepoSummary, setShowRepoSummary] = useState(false);
+
+  const handleRepoSummary = async () => {
+    setShowRepoSummary(true);
+    if (repoSummary) return; // already fetched
+    setLoadingRepoSummary(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/repo-summary`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ repo_path: repoPath.trim() }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || "Failed to generate repo summary.");
+      }
+      const data = await res.json();
+      setRepoSummary(data.summary);
+    } catch (err: any) {
+      setRepoSummary(`Error: ${err.message}`);
+    } finally {
+      setLoadingRepoSummary(false);
+    }
+  };
 
   const handleAnalyse = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -231,16 +258,28 @@ function App() {
             </button>
           </form>
           {graphData && (
-            <button
-              onClick={() => { setDiffMode((d) => !d); setDiffData(null); setDiffError(null); }}
-              className={`flex items-center gap-1.5 font-semibold text-xs px-4 py-2.5 rounded-lg transition-all whitespace-nowrap border cursor-pointer ${diffMode
-                  ? "bg-violet-600 hover:bg-violet-500 text-white border-violet-500"
-                  : "bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700"
-                }`}
-            >
-              <GitCompare className="h-3.5 w-3.5" />
-              {diffMode ? "Exit Diff" : "Diff"}
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleRepoSummary}
+                disabled={loadingRepoSummary}
+                className="flex items-center gap-1.5 font-semibold text-xs px-4 py-2.5 rounded-lg transition-all whitespace-nowrap border cursor-pointer bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700 disabled:opacity-50"
+              >
+                {loadingRepoSummary
+                  ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  : <BookOpen className="h-3.5 w-3.5" />}
+                Explain Repo
+              </button>
+              <button
+                onClick={() => { setDiffMode((d) => !d); setDiffData(null); setDiffError(null); }}
+                className={`flex items-center gap-1.5 font-semibold text-xs px-4 py-2.5 rounded-lg transition-all whitespace-nowrap border cursor-pointer ${diffMode
+                    ? "bg-violet-600 hover:bg-violet-500 text-white border-violet-500"
+                    : "bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700"
+                  }`}
+              >
+                <GitCompare className="h-3.5 w-3.5" />
+                {diffMode ? "Exit Diff" : "Diff"}
+              </button>
+            </div>
           )}
         </div>
 
@@ -419,6 +458,44 @@ function App() {
           repoPath={repoPath.trim()}
           apiBaseUrl={API_BASE_URL}
         />
+
+        {/* Repo-level architectural summary modal */}
+        {showRepoSummary && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm" onClick={() => setShowRepoSummary(false)}>
+            <div className="relative w-full max-w-2xl bg-[#0f172a] border border-slate-700 rounded-2xl shadow-2xl flex flex-col gap-4 p-6" onClick={(e) => e.stopPropagation()}>
+              {/* Header */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <BookOpen className="h-5 w-5 text-indigo-400" />
+                  <h2 className="font-bold text-slate-100 text-base">Repository Overview</h2>
+                </div>
+                <button onClick={() => setShowRepoSummary(false)} className="text-slate-400 hover:text-slate-200 hover:bg-slate-800 p-1.5 rounded-lg transition-colors cursor-pointer">
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              {/* Body */}
+              <div className="min-h-[120px] flex items-start">
+                {loadingRepoSummary ? (
+                  <div className="w-full flex flex-col items-center justify-center py-10 gap-3">
+                    <Loader2 className="h-8 w-8 text-indigo-400 animate-spin" />
+                    <span className="text-xs text-slate-400 animate-pulse">Analysing codebase architecture...</span>
+                  </div>
+                ) : (
+                  <p className="text-sm text-slate-300 leading-relaxed whitespace-pre-wrap">{repoSummary}</p>
+                )}
+              </div>
+              {/* Refresh */}
+              {!loadingRepoSummary && (
+                <button
+                  onClick={() => { setRepoSummary(null); handleRepoSummary(); }}
+                  className="self-end text-[10px] font-semibold text-slate-500 hover:text-slate-300 transition-colors cursor-pointer"
+                >
+                  Regenerate
+                </button>
+              )}
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );
