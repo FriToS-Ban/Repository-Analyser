@@ -20,6 +20,131 @@ EXCLUDE_DIRS = {
     ".vscode"
 }
 
+def glob_to_regex_body(pattern: str) -> str:
+    res = []
+    i = 0
+    n = len(pattern)
+    while i < n:
+        c = pattern[i]
+        if c == '*':
+            if i + 1 < n and pattern[i+1] == '*':
+                res.append('.*')
+                i += 2
+                if i < n and pattern[i] == '/':
+                    i += 1
+                continue
+            else:
+                res.append('[^/]*')
+                i += 1
+        elif c == '?':
+            res.append('[^/]')
+            i += 1
+        elif c == '[':
+            j = i + 1
+            if j < n and pattern[j] == '!':
+                j += 1
+            if j < n and pattern[j] == ']':
+                j += 1
+            while j < n and pattern[j] != ']':
+                j += 1
+            if j >= n:
+                res.append(re.escape('['))
+                i += 1
+            else:
+                stuff = pattern[i+1:j].replace('\\', '\\\\')
+                i = j + 1
+                if stuff.startswith('!'):
+                    stuff = '^' + stuff[1:]
+                elif stuff.startswith('^'):
+                    stuff = '\\^' + stuff[1:]
+                res.append('[' + stuff + ']')
+        else:
+            res.append(re.escape(c))
+            i += 1
+    return ''.join(res)
+
+
+class IgnoreManager:
+    def __init__(self, root_path: str):
+        self.root_path = os.path.abspath(root_path)
+        self.rules = []
+        self._load_ignore_files()
+
+    def _load_ignore_files(self):
+        for root, dirs, files in os.walk(self.root_path):
+            dirs[:] = [d for d in dirs if d not in EXCLUDE_DIRS]
+            rel_dir = os.path.relpath(root, self.root_path).replace("\\", "/")
+            if rel_dir == ".":
+                rel_dir = ""
+            for ignore_filename in (".gitignore", ".repoignore"):
+                if ignore_filename in files:
+                    ignore_file_path = os.path.join(root, ignore_filename)
+                    self._parse_file(ignore_file_path, rel_dir)
+
+    def _parse_file(self, file_path: str, base_rel: str):
+        try:
+            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    negate = False
+                    if line.startswith("!"):
+                        negate = True
+                        line = line[1:]
+                    is_dir_only = False
+                    if line.endswith("/"):
+                        is_dir_only = True
+                        line = line[:-1]
+                    
+                    anchored = False
+                    if line.startswith("/"):
+                        anchored = True
+                        line = line[1:]
+                    elif "/" in line:
+                        anchored = True
+                    
+                    regex_body = glob_to_regex_body(line)
+                    if anchored:
+                        if base_rel:
+                            regex_dir = f"^{re.escape(base_rel)}/{regex_body}(?:/.*)?$"
+                            regex_inside = f"^{re.escape(base_rel)}/{regex_body}/.*$"
+                        else:
+                            regex_dir = f"^{regex_body}(?:/.*)?$"
+                            regex_inside = f"^{regex_body}/.*$"
+                    else:
+                        if base_rel:
+                            regex_dir = f"^{re.escape(base_rel)}/(?:.*/)?{regex_body}(?:/.*)?$"
+                            regex_inside = f"^{re.escape(base_rel)}/(?:.*/)?{regex_body}/.*$"
+                        else:
+                            regex_dir = f"(?:^|/){regex_body}(?:/.*)?$"
+                            regex_inside = f"(?:^|/){regex_body}/.*$"
+
+                    try:
+                        self.rules.append({
+                            "regex_dir": re.compile(regex_dir),
+                            "regex_inside": re.compile(regex_inside),
+                            "negate": negate,
+                            "is_dir_only": is_dir_only,
+                        })
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+    def is_ignored(self, rel_path: str, is_dir: bool = False) -> bool:
+        parts = rel_path.split("/")
+        if any(p in EXCLUDE_DIRS for p in parts):
+            return True
+        
+        ignored = False
+        for rule in self.rules:
+            rx = rule["regex_dir"] if (is_dir or not rule["is_dir_only"]) else rule["regex_inside"]
+            if rx.search(rel_path):
+                ignored = not rule["negate"]
+        return ignored
+
+
 # Top-level stdlib module names, used to avoid resolving e.g. `import types`
 # to a local types.py file that happens to share the name.
 STDLIB_MODULES = set(sys.stdlib_module_names)
@@ -214,13 +339,26 @@ def parse_repo(root_path: str, progress_callback=None) -> dict:
     # For files whose mtime/size changed we read + hash the content and
     # check the parse_cache before running the expensive import extraction.
     # ------------------------------------------------------------------
+    ignore_manager = IgnoreManager(root_path)
     all_files = []
 
     for root, dirs, files in os.walk(root_path):
-        dirs[:] = [d for d in dirs if d not in EXCLUDE_DIRS]
+        rel_root = os.path.relpath(root, root_path).replace("\\", "/")
+        if rel_root == ".":
+            rel_root = ""
+
+        kept_dirs = []
+        for d in dirs:
+            dir_rel = f"{rel_root}/{d}".strip("/") if rel_root else d
+            if not ignore_manager.is_ignored(dir_rel, is_dir=True):
+                kept_dirs.append(d)
+        dirs[:] = kept_dirs
+
         for file in files:
             full_path = os.path.join(root, file)
             rel_path = os.path.relpath(full_path, root_path).replace("\\", "/")
+            if ignore_manager.is_ignored(rel_path, is_dir=False):
+                continue
             _, ext = os.path.splitext(file)
             all_files.append({
                 "rel_path": rel_path,
@@ -303,12 +441,12 @@ def _list_git_ref_files(repo_path: str, ref: str) -> list[str]:
         err = result.stderr.decode("utf-8", errors="replace").strip()
         raise ValueError(f"git ls-tree failed for ref '{ref}': {err}")
     paths = result.stdout.decode("utf-8", errors="replace").splitlines()
-    # Filter out excluded directories (match first path component)
+    ignore_manager = IgnoreManager(repo_path)
     filtered = []
     for p in paths:
-        parts = p.replace("\\", "/").split("/")
-        if not any(part in EXCLUDE_DIRS for part in parts):
-            filtered.append(p.replace("\\", "/"))
+        norm_p = p.replace("\\", "/")
+        if not ignore_manager.is_ignored(norm_p, is_dir=False):
+            filtered.append(norm_p)
     return filtered
 
 def _read_git_file(repo_path: str, ref: str, rel_path: str) -> str | None:
