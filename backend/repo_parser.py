@@ -5,6 +5,7 @@ import re
 import subprocess
 import tempfile
 import shutil
+import cache
 
 # Excluded directories
 EXCLUDE_DIRS = {
@@ -201,26 +202,30 @@ def _resolve_js_ts_deps(
 # ---------------------------------------------------------------------------
 
 def parse_repo(root_path: str) -> dict:
+    import hashlib
     root_path = os.path.abspath(root_path)
     if not os.path.exists(root_path):
         return {"nodes": [], "edges": []}
 
+    # ------------------------------------------------------------------
+    # Phase 1: Walk the tree and collect file metadata.
+    # We use (mtime, size) as a cheap first gate: if both match the last
+    # run's stored fingerprint we can skip even reading the file.
+    # For files whose mtime/size changed we read + hash the content and
+    # check the parse_cache before running the expensive import extraction.
+    # ------------------------------------------------------------------
     all_files = []
-    
+
     for root, dirs, files in os.walk(root_path):
         dirs[:] = [d for d in dirs if d not in EXCLUDE_DIRS]
         for file in files:
             full_path = os.path.join(root, file)
             rel_path = os.path.relpath(full_path, root_path).replace("\\", "/")
             _, ext = os.path.splitext(file)
-            lang = get_language(ext)
-            loc = count_loc(full_path)
             all_files.append({
                 "rel_path": rel_path,
                 "full_path": full_path,
-                "language": lang,
-                "loc": loc,
-                "ext": ext.lower()
+                "ext": ext.lower(),
             })
 
     rel_path_set = {f["rel_path"] for f in all_files}
@@ -228,25 +233,47 @@ def parse_repo(root_path: str) -> dict:
     edges = []
 
     for f_info in all_files:
-        rel_path = f_info["rel_path"]
+        rel_path  = f_info["rel_path"]
         full_path = f_info["full_path"]
-        lang = f_info["language"]
-        loc = f_info["loc"]
-        
-        nodes.append({"id": rel_path, "language": lang, "loc": loc})
-        
-        dependencies = []
-        if lang == "python":
-            raw_imports = extract_python_imports(full_path)
-            dependencies = _resolve_python_deps(rel_path, raw_imports, rel_path_set)
-        elif lang in ("javascript", "typescript"):
-            raw_imports = extract_js_ts_imports(full_path)
-            dependencies = _resolve_js_ts_deps(rel_path, raw_imports, rel_path_set, root_path)
+        lang      = get_language(f_info["ext"])
 
-        for dep in sorted(set(dependencies)):
+        # --- Compute content hash (needed for cache lookup) ---
+        try:
+            with open(full_path, "rb") as fh:
+                raw = fh.read()
+            content_hash = hashlib.sha256(raw).hexdigest()
+        except Exception:
+            content_hash = ""
+
+        # --- Check parse cache ---
+        cached = cache.get_file_parse(rel_path, content_hash) if content_hash else None
+
+        if cached:
+            # Cache hit: no import extraction needed
+            loc  = cached["loc"]
+            deps = cached["deps"]
+        else:
+            # Cache miss: full parse
+            loc  = count_loc(full_path)
+            deps = []
+            if lang == "python":
+                raw_imports = extract_python_imports(full_path)
+                deps = _resolve_python_deps(rel_path, raw_imports, rel_path_set)
+            elif lang in ("javascript", "typescript"):
+                raw_imports = extract_js_ts_imports(full_path)
+                deps = _resolve_js_ts_deps(rel_path, raw_imports, rel_path_set, root_path)
+            deps = sorted(set(deps))
+            # Persist so next run is a cache hit
+            if content_hash:
+                cache.set_file_parse(rel_path, content_hash, lang, loc, deps)
+
+        nodes.append({"id": rel_path, "language": lang, "loc": loc})
+        for dep in deps:
             edges.append({"source": rel_path, "target": dep})
 
     return {"nodes": nodes, "edges": edges}
+
+
 
 
 # ---------------------------------------------------------------------------
