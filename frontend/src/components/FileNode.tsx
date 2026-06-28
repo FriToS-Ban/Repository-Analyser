@@ -1,6 +1,7 @@
 import { memo } from "react";
 import { Handle, Position } from "reactflow";
 import { getDiffNodeStyle } from "./Graph";
+import { Pin } from "lucide-react";
 
 export const FileNode = memo(({ data }: any) => {
   const getLangStyles = (lang: string) => {
@@ -22,6 +23,7 @@ export const FileNode = memo(({ data }: any) => {
   const isHighlighted = data.isHighlighted;
   const isSelected = data.isSelected;
   const isOrphan = data.isOrphan;
+  const isPinned = data.isPinned;
   const diffStatus = data.diffStatus as string | undefined;
 
   let highlightClass = "";
@@ -37,14 +39,30 @@ export const FileNode = memo(({ data }: any) => {
 
   return (
     <div
-      className={`px-4 py-3 rounded-xl border backdrop-blur-sm shadow-xl transition-all duration-200 min-w-[150px] text-center select-none ${diffStatus ? getDiffNodeStyle(diffStatus) : getLangStyles(data.language)} ${!diffStatus ? highlightClass : ""} ${isOrphan && !diffStatus ? "border-dashed" : ""}`}
+      className={`relative group px-4 py-3 rounded-xl border backdrop-blur-sm shadow-xl transition-all duration-200 min-w-[150px] text-center select-none ${diffStatus ? getDiffNodeStyle(diffStatus) : getLangStyles(data.language)} ${!diffStatus ? highlightClass : ""} ${isOrphan && !diffStatus ? "border-dashed" : ""}`}
     >
+      {data.onTogglePin && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            data.onTogglePin(data.id);
+          }}
+          className={`absolute top-1.5 right-1.5 p-1 rounded-md transition-all cursor-pointer z-10 ${
+            isPinned
+              ? "text-amber-400 hover:text-amber-300 bg-amber-500/10"
+              : "text-slate-500 hover:text-slate-300 opacity-0 group-hover:opacity-100"
+          }`}
+          title={isPinned ? "Unpin node position" : "Pin node position"}
+        >
+          <Pin className={`h-3 w-3 ${isPinned ? "fill-amber-400/30" : ""}`} />
+        </button>
+      )}
       <Handle
         type="target"
         position={Position.Left}
         className="!bg-slate-500 !w-2.5 !h-2.5"
       />
-      <div className="font-semibold text-xs truncate max-w-[160px] tracking-wide">
+      <div className="font-semibold text-xs truncate max-w-[160px] tracking-wide pr-3">
         {filename}
       </div>
       <div className="text-[9px] opacity-75 mt-1 font-mono tracking-wider flex items-center justify-center gap-1.5">

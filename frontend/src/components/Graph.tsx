@@ -325,6 +325,71 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, selectedFile, onSelectFile, d
   const [langFilter, setLangFilter] = useState<Set<string>>(new Set());
   const [exporting, setExporting] = useState(false);
 
+  const [pinnedNodes, setPinnedNodes] = useState<Record<string, { x: number; y: number }>>(() => {
+    try {
+      const saved = localStorage.getItem("graph_pinned_nodes");
+      return saved ? JSON.parse(saved) : {};
+    } catch (e) {
+      return {};
+    }
+  });
+
+  const pinnedNodesRef = useRef(pinnedNodes);
+  useEffect(() => {
+    pinnedNodesRef.current = pinnedNodes;
+    try {
+      localStorage.setItem("graph_pinned_nodes", JSON.stringify(pinnedNodes));
+    } catch (e) {
+      console.error("Failed to save pinned nodes to localStorage", e);
+    }
+  }, [pinnedNodes]);
+
+  const handleTogglePin = useCallback((nodeId: string) => {
+    setNodes((currentNodes) => {
+      const targetNode = currentNodes.find((n) => n.id === nodeId);
+      if (!targetNode) return currentNodes;
+
+      const isCurrentlyPinned = Boolean(targetNode.data?.isPinned);
+
+      setPinnedNodes((prev) => {
+        const next = { ...prev };
+        if (isCurrentlyPinned) {
+          delete next[nodeId];
+        } else {
+          next[nodeId] = { x: targetNode.position.x, y: targetNode.position.y };
+        }
+        return next;
+      });
+
+      return currentNodes.map((n) => {
+        if (n.id === nodeId) {
+          return {
+            ...n,
+            data: {
+              ...n.data,
+              isPinned: !isCurrentlyPinned,
+            },
+          };
+        }
+        return n;
+      });
+    });
+  }, [setNodes]);
+
+  const onNodeDragStop = useCallback((_event: React.MouseEvent, node: any) => {
+    setPinnedNodes((prev) => ({
+      ...prev,
+      [node.id]: { x: node.position.x, y: node.position.y },
+    }));
+    setNodes((prevNodes) =>
+      prevNodes.map((n) =>
+        n.id === node.id
+          ? { ...n, position: node.position, data: { ...n.data, isPinned: true } }
+          : n
+      )
+    );
+  }, [setNodes]);
+
   const reactFlowWrapperRef = useRef<HTMLDivElement>(null);
 
   const handleExportPng = () => {
@@ -444,14 +509,20 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, selectedFile, onSelectFile, d
     // ✅ FIX: Use rfNodes from the shared layoutResult — no second layout call here.
     // Also stamp isOrphan directly at construction time so the highlight effect below
     // never needs to look it up (removing the risk of it being overwritten).
-    setNodes(rfNodes.map((n) => ({
-      ...n,
-      data: {
-        ...n.data,
-        isOrphan: n.data.isFolder ? false : orphanNodeIds.has(n.id),
-        diffStatus: diffMode ? (data.nodes.find((dn) => dn.id === n.id)?.status) : undefined, // ← add
-      },
-    })));
+    setNodes(rfNodes.map((n) => {
+      const pinnedPos = pinnedNodesRef.current[n.id];
+      return {
+        ...n,
+        position: pinnedPos ? { ...pinnedPos } : n.position,
+        data: {
+          ...n.data,
+          isPinned: Boolean(pinnedPos),
+          onTogglePin: handleTogglePin,
+          isOrphan: n.data.isFolder ? false : orphanNodeIds.has(n.id),
+          diffStatus: diffMode ? (data.nodes.find((dn) => dn.id === n.id)?.status) : undefined,
+        },
+      };
+    }));
 
     setEdges(data.edges.map((e, index) => {
       const color = getEdgeColor(e.source, e.target, e.status); // ← pass e.status
@@ -756,6 +827,7 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, selectedFile, onSelectFile, d
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onNodeClick={onNodeClick}
+          onNodeDragStop={onNodeDragStop}
           onPaneClick={() => onSelectFile(null)}
           fitView
           minZoom={0.1}
