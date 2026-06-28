@@ -490,6 +490,7 @@ function App() {
             selectedFile={selectedFile}
             onSelectFile={handleSelectFile}
             diffMode={diffMode && !!diffData}
+            repoPath={repoPath.trim()}
           />
         ) : (
           <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center space-y-4">

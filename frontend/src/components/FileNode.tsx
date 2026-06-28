@@ -17,6 +17,13 @@ export const FileNode = memo(({ data }: any) => {
     }
   };
 
+  const getChurnStyles = (ratio: number, count: number) => {
+    if (count === 0) return "border-slate-800/80 bg-slate-950/70 text-slate-500 opacity-50 shadow-none";
+    if (ratio > 0.66) return "border-red-500/90 bg-gradient-to-r from-red-950/90 via-rose-900/80 to-orange-950/90 text-red-100 shadow-[0_0_22px_rgba(239,68,68,0.55)] ring-1 ring-red-400/50";
+    if (ratio > 0.33) return "border-amber-500/80 bg-gradient-to-r from-amber-950/85 via-orange-900/75 to-yellow-950/85 text-amber-100 shadow-[0_0_16px_rgba(245,158,11,0.4)]";
+    return "border-emerald-500/70 bg-gradient-to-r from-emerald-950/80 to-teal-950/80 text-emerald-200 shadow-[0_0_12px_rgba(16,185,129,0.3)]";
+  };
+
   const filename = data.id.split("/").pop() || data.id;
 
   const isSearchActive = data.isSearchActive;
@@ -25,6 +32,10 @@ export const FileNode = memo(({ data }: any) => {
   const isOrphan = data.isOrphan;
   const isPinned = data.isPinned;
   const diffStatus = data.diffStatus as string | undefined;
+
+  const isChurnActive = data.isChurnActive;
+  const churnCount = data.churnCount || 0;
+  const churnRatio = data.churnRatio || 0;
 
   let highlightClass = "";
   if (isSearchActive) {
@@ -37,9 +48,15 @@ export const FileNode = memo(({ data }: any) => {
     }
   }
 
+  const baseStyle = diffStatus
+    ? getDiffNodeStyle(diffStatus)
+    : isChurnActive
+    ? getChurnStyles(churnRatio, churnCount)
+    : getLangStyles(data.language);
+
   return (
     <div
-      className={`relative group px-4 py-3 rounded-xl border backdrop-blur-sm shadow-xl transition-all duration-200 min-w-[150px] text-center select-none ${diffStatus ? getDiffNodeStyle(diffStatus) : getLangStyles(data.language)} ${!diffStatus ? highlightClass : ""} ${isOrphan && !diffStatus ? "border-dashed" : ""}`}
+      className={`relative group px-4 py-3 rounded-xl border backdrop-blur-sm shadow-xl transition-all duration-200 min-w-[150px] text-center select-none ${baseStyle} ${!diffStatus && !isChurnActive ? highlightClass : ""} ${isOrphan && !diffStatus && !isChurnActive ? "border-dashed" : ""}`}
     >
       {data.onTogglePin && (
         <button
@@ -70,6 +87,19 @@ export const FileNode = memo(({ data }: any) => {
         <span>•</span>
         <span>{data.incomingEdges || 0} {data.incomingEdges === 1 ? "import" : "imports"}</span>
       </div>
+      {isChurnActive && (
+        <div className="mt-1.5 flex items-center justify-center">
+          <span className={`text-[9px] font-mono font-bold px-1.5 py-0.5 rounded-full border flex items-center gap-1 ${
+            churnRatio > 0.66
+              ? "bg-red-500/80 text-white border-red-400 shadow-sm shadow-red-500/50 animate-pulse"
+              : churnRatio > 0.33
+              ? "bg-amber-500/30 text-amber-200 border-amber-400/50"
+              : "bg-emerald-500/30 text-emerald-200 border-emerald-400/50"
+          }`}>
+            🔥 {churnCount} {churnCount === 1 ? "commit" : "commits"}
+          </span>
+        </div>
+      )}
       <Handle
         type="source"
         position={Position.Right}

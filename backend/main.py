@@ -441,6 +441,39 @@ def get_refs(path: str = Query(..., description="Absolute path of the Git reposi
 
 
 # ---------------------------------------------------------------------------
+# New: /api/churn — commit frequency for churn heatmap
+# ---------------------------------------------------------------------------
+
+@app.get("/api/churn")
+def get_churn(
+    path: str = Query(..., description="Absolute path of the Git repository"),
+    days: int = Query(90, description="Time window in days (30, 90, 365)"),
+):
+    import subprocess
+    from collections import Counter
+    abs_path = os.path.abspath(path)
+    if not os.path.exists(abs_path):
+        raise HTTPException(status_code=404, detail="Repository path not found.")
+
+    try:
+        cmd = ["git", "log", f"--since={days} days ago", "--name-only", "--pretty=format:"]
+        res = subprocess.run(cmd, cwd=abs_path, capture_output=True, text=True, errors="ignore")
+        if res.returncode != 0:
+            return {"churn": {}, "max_churn": 0}
+
+        counts = Counter()
+        for line in res.stdout.splitlines():
+            line_str = line.strip().replace("\\", "/")
+            if line_str:
+                counts[line_str] += 1
+
+        max_churn = max(counts.values()) if counts else 0
+        return {"churn": dict(counts), "max_churn": max_churn}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
 # New: /api/diff — compare two git refs and return a full diff graph
 # ---------------------------------------------------------------------------
 

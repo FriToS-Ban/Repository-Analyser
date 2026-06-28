@@ -33,6 +33,7 @@ interface GraphProps {
   selectedFile: { path: string; language: string; loc: number; fanIn: number } | null;
   onSelectFile: (file: { path: string; language: string; loc: number; fanIn: number } | null) => void;
   diffMode?: boolean;
+  repoPath?: string;
 }
 
 // Layout constants
@@ -315,7 +316,7 @@ export const getDiffNodeStyle = (status?: string) => {
   }
 };
 
-const GraphCanvas: React.FC<GraphProps> = ({ data, selectedFile, onSelectFile, diffMode = false }) => {
+const GraphCanvas: React.FC<GraphProps> = ({ data, selectedFile, onSelectFile, diffMode = false, repoPath }) => {
   const { fitView, getNode, setCenter } = useReactFlow();
   const nodeTypes = useMemo(() => ({ fileNode: FileNode, folderNode: FolderGroupNode }), []);
 
@@ -324,6 +325,26 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, selectedFile, onSelectFile, d
   const [searchQuery, setSearchQuery] = useState("");
   const [langFilter, setLangFilter] = useState<Set<string>>(new Set());
   const [exporting, setExporting] = useState(false);
+
+  const [churnDays, setChurnDays] = useState<number | null>(null);
+  const [churnData, setChurnData] = useState<{ churn: Record<string, number>; max_churn: number } | null>(null);
+  const [loadingChurn, setLoadingChurn] = useState(false);
+
+  useEffect(() => {
+    if (!churnDays || !repoPath) {
+      setChurnData(null);
+      return;
+    }
+    setLoadingChurn(true);
+    fetch(`http://localhost:8000/api/churn?path=${encodeURIComponent(repoPath)}&days=${churnDays}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data) setChurnData(data);
+        else setChurnData(null);
+      })
+      .catch(() => setChurnData(null))
+      .finally(() => setLoadingChurn(false));
+  }, [churnDays, repoPath]);
 
   const [pinnedNodes, setPinnedNodes] = useState<Record<string, { x: number; y: number }>>(() => {
     try {
@@ -511,6 +532,9 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, selectedFile, onSelectFile, d
     // never needs to look it up (removing the risk of it being overwritten).
     setNodes(rfNodes.map((n) => {
       const pinnedPos = pinnedNodesRef.current[n.id];
+      const count = churnData?.churn[n.id] || 0;
+      const max = churnData?.max_churn || 1;
+      const ratio = max > 0 ? count / max : 0;
       return {
         ...n,
         position: pinnedPos ? { ...pinnedPos } : n.position,
@@ -520,6 +544,9 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, selectedFile, onSelectFile, d
           onTogglePin: handleTogglePin,
           isOrphan: n.data.isFolder ? false : orphanNodeIds.has(n.id),
           diffStatus: diffMode ? (data.nodes.find((dn) => dn.id === n.id)?.status) : undefined,
+          isChurnActive: churnDays !== null,
+          churnCount: count,
+          churnRatio: ratio,
         },
       };
     }));
@@ -558,6 +585,27 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, selectedFile, onSelectFile, d
       prevDataRef.current = data;
     }
   }, [data]);
+
+  // Update nodes with churn metrics whenever churnData or churnDays changes
+  useEffect(() => {
+    setNodes((prevNodes) =>
+      prevNodes.map((node) => {
+        if (node.data?.isFolder) return node;
+        const count = churnData?.churn[node.id] || 0;
+        const max = churnData?.max_churn || 1;
+        const ratio = max > 0 ? count / max : 0;
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            isChurnActive: churnDays !== null,
+            churnCount: count,
+            churnRatio: ratio,
+          },
+        };
+      })
+    );
+  }, [churnData, churnDays, setNodes]);
 
   // Effect 2: Update highlight / dim state in response to search, lang filter, or selection.
   // ✅ FIX: Preserve `isOrphan` from existing node data instead of recalculating or dropping it.
@@ -797,6 +845,38 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, selectedFile, onSelectFile, d
             )}
             {exporting ? "Exporting..." : "Export as PNG"}
           </button>
+
+          {/* Churn Heatmap Selector */}
+          <div className="flex flex-col gap-1.5 border-t border-slate-800 pt-2.5">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1">
+                🔥 Churn Heatmap
+              </span>
+              {loadingChurn && (
+                <div className="h-3 w-3 border-2 border-amber-400 border-t-transparent rounded-full animate-spin"></div>
+              )}
+            </div>
+            <div className="grid grid-cols-4 gap-1">
+              {[
+                { label: "Off", value: null },
+                { label: "30d", value: 30 },
+                { label: "90d", value: 90 },
+                { label: "365d", value: 365 },
+              ].map((opt) => (
+                <button
+                  key={opt.label}
+                  onClick={() => setChurnDays(opt.value)}
+                  className={`text-[10px] font-semibold py-1 px-1.5 rounded-lg border text-center transition-all cursor-pointer ${
+                    churnDays === opt.value
+                      ? "bg-amber-500 text-slate-950 border-amber-400 font-bold shadow-sm shadow-amber-500/30"
+                      : "bg-slate-800/60 text-slate-400 border-slate-700 hover:bg-slate-700/60"
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
 
           {/* Edge color legend */}
           <div className="border-t border-slate-800 pt-2 flex flex-col gap-1">
