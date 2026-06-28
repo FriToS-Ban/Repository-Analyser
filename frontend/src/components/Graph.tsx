@@ -33,6 +33,7 @@ interface GraphProps {
   selectedFile: { path: string; language: string; loc: number; fanIn: number } | null;
   onSelectFile: (file: { path: string; language: string; loc: number; fanIn: number } | null) => void;
   diffMode?: boolean;
+  contractMode?: boolean;
   repoPath?: string;
 }
 
@@ -316,7 +317,7 @@ export const getDiffNodeStyle = (status?: string) => {
   }
 };
 
-const GraphCanvas: React.FC<GraphProps> = ({ data, selectedFile, onSelectFile, diffMode = false, repoPath }) => {
+const GraphCanvas: React.FC<GraphProps> = ({ data, selectedFile, onSelectFile, diffMode = false, contractMode = false, repoPath }) => {
   const { fitView, getNode, setCenter } = useReactFlow();
   const nodeTypes = useMemo(() => ({ fileNode: FileNode, folderNode: FolderGroupNode }), []);
 
@@ -519,6 +520,21 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, selectedFile, onSelectFile, d
     return counts;
   }, [data.nodes, data.edges]);
 
+  const contractInfo = useMemo(() => {
+    const crossEdges = new Set<string>();
+    const publicNodes = new Set<string>();
+    data.edges.forEach((e) => {
+      const srcDir = e.source.split("/").slice(0, -1).join("/") || "__root__";
+      const tgtDir = e.target.split("/").slice(0, -1).join("/") || "__root__";
+      if (srcDir !== tgtDir) {
+        crossEdges.add(`${e.source}->${e.target}`);
+        publicNodes.add(e.source);
+        publicNodes.add(e.target);
+      }
+    });
+    return { crossEdges, publicNodes };
+  }, [data.edges]);
+
   // Effect 1: Rebuild nodes and edges when data changes (new repo analysed)
   useEffect(() => {
     if (!data.nodes || data.nodes.length === 0) {
@@ -547,6 +563,8 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, selectedFile, onSelectFile, d
           isChurnActive: churnDays !== null,
           churnCount: count,
           churnRatio: ratio,
+          isContractMode: Boolean(contractMode),
+          isContractNode: contractInfo.publicNodes.has(n.id),
         },
       };
     }));
@@ -606,6 +624,63 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, selectedFile, onSelectFile, d
       })
     );
   }, [churnData, churnDays, setNodes]);
+
+  // Effect for Contract Mode updates
+  useEffect(() => {
+    setNodes((prev) =>
+      prev.map((node) => {
+        if (node.data?.isFolder) return node;
+        const isPublic = contractInfo.publicNodes.has(node.id);
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            isContractMode: Boolean(contractMode),
+            isContractNode: isPublic,
+          },
+        };
+      })
+    );
+
+    setEdges((prev) =>
+      prev.map((edge) => {
+        if (!contractMode) {
+          const defaultColor = getEdgeColor(edge.source, edge.target);
+          return {
+            ...edge,
+            animated: true,
+            style: {
+              stroke: defaultColor,
+              strokeWidth: defaultColor === "#ef4444" ? 2 : 1,
+              opacity: 1,
+            },
+            markerEnd: {
+              type: MarkerType.ArrowClosed,
+              color: defaultColor,
+              width: 16,
+              height: 16,
+            },
+          };
+        }
+        const isCross = contractInfo.crossEdges.has(`${edge.source}->${edge.target}`);
+        return {
+          ...edge,
+          animated: isCross,
+          style: {
+            stroke: isCross ? "#38bdf8" : "#1e293b",
+            strokeWidth: isCross ? 3 : 1,
+            opacity: isCross ? 1 : 0.1,
+          },
+          markerEnd: {
+            type: MarkerType.ArrowClosed,
+            color: isCross ? "#38bdf8" : "#1e293b",
+            width: isCross ? 18 : 12,
+            height: isCross ? 18 : 12,
+          },
+        };
+      })
+    );
+  }, [contractMode, contractInfo, getEdgeColor, setNodes, setEdges]);
 
   // Effect 2: Update highlight / dim state in response to search, lang filter, or selection.
   // ✅ FIX: Preserve `isOrphan` from existing node data instead of recalculating or dropping it.

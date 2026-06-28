@@ -1,5 +1,5 @@
 import { useState, useMemo, useRef } from "react";
-import { FolderGit2, Play, AlertCircle, FileCode2, Hash, GitCompare, BookOpen, X, Loader2 } from "lucide-react";
+import { FolderGit2, Play, AlertCircle, FileCode2, Hash, GitCompare, BookOpen, X, Loader2, Layers } from "lucide-react";
 import { Graph } from "./components/Graph";
 import { SidePanel } from "./components/SidePanel";
 
@@ -66,6 +66,7 @@ function App() {
   const [parseProgress, setParseProgress] = useState<{ done: number; total: number } | null>(null);
 
   const [diffMode, setDiffMode] = useState(false);
+  const [contractMode, setContractMode] = useState(false);
   const [baseRef, setBaseRef] = useState("");
   const [headRef, setHeadRef] = useState("");
   const [diffData, setDiffData] = useState<DiffData | null>(null);
@@ -328,6 +329,17 @@ function App() {
                 <GitCompare className="h-3.5 w-3.5" />
                 {diffMode ? "Exit Diff" : "Diff"}
               </button>
+              <button
+                onClick={() => setContractMode((c) => !c)}
+                className={`flex items-center gap-1.5 font-semibold text-xs px-4 py-2.5 rounded-lg transition-all whitespace-nowrap border cursor-pointer ${contractMode
+                    ? "bg-cyan-600 hover:bg-cyan-500 text-white border-cyan-500 shadow-lg shadow-cyan-950/50"
+                    : "bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700"
+                  }`}
+                title="Collapses internal implementation details and shows public API boundaries between modules"
+              >
+                <Layers className="h-3.5 w-3.5" />
+                {contractMode ? "Exit Contract View" : "Contract View"}
+              </button>
             </div>
           )}
         </div>
@@ -490,6 +502,7 @@ function App() {
             selectedFile={selectedFile}
             onSelectFile={handleSelectFile}
             diffMode={diffMode && !!diffData}
+            contractMode={contractMode}
             repoPath={repoPath.trim()}
           />
         ) : (

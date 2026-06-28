@@ -37,6 +37,9 @@ export const FileNode = memo(({ data }: any) => {
   const churnCount = data.churnCount || 0;
   const churnRatio = data.churnRatio || 0;
 
+  const isContractMode = data.isContractMode;
+  const isContractNode = data.isContractNode;
+
   let highlightClass = "";
   if (isSearchActive) {
     if (isSelected) {
@@ -50,13 +53,17 @@ export const FileNode = memo(({ data }: any) => {
 
   const baseStyle = diffStatus
     ? getDiffNodeStyle(diffStatus)
+    : isContractMode
+    ? isContractNode
+      ? "border-cyan-400/90 bg-gradient-to-r from-cyan-950/90 via-sky-900/80 to-blue-950/90 text-cyan-100 shadow-[0_0_20px_rgba(56,189,248,0.5)] ring-2 ring-cyan-400/60 z-30"
+      : "border-slate-800/60 bg-slate-950/20 text-slate-600 opacity-20 shadow-none scale-95"
     : isChurnActive
     ? getChurnStyles(churnRatio, churnCount)
     : getLangStyles(data.language);
 
   return (
     <div
-      className={`relative group px-4 py-3 rounded-xl border backdrop-blur-sm shadow-xl transition-all duration-200 min-w-[150px] text-center select-none ${baseStyle} ${!diffStatus && !isChurnActive ? highlightClass : ""} ${isOrphan && !diffStatus && !isChurnActive ? "border-dashed" : ""}`}
+      className={`relative group px-4 py-3 rounded-xl border backdrop-blur-sm shadow-xl transition-all duration-200 min-w-[150px] text-center select-none ${baseStyle} ${!diffStatus && !isChurnActive && !isContractMode ? highlightClass : ""} ${isOrphan && !diffStatus && !isChurnActive && !isContractMode ? "border-dashed" : ""}`}
     >
       {data.onTogglePin && (
         <button
@@ -87,7 +94,14 @@ export const FileNode = memo(({ data }: any) => {
         <span>•</span>
         <span>{data.incomingEdges || 0} {data.incomingEdges === 1 ? "import" : "imports"}</span>
       </div>
-      {isChurnActive && (
+      {isContractMode && isContractNode && (
+        <div className="mt-1.5 flex items-center justify-center">
+          <span className="text-[8px] font-bold tracking-wider uppercase px-2 py-0.5 rounded-full bg-cyan-500/25 border border-cyan-400/50 text-cyan-200 shadow-sm shadow-cyan-500/30">
+            Contract API
+          </span>
+        </div>
+      )}
+      {isChurnActive && !isContractMode && (
         <div className="mt-1.5 flex items-center justify-center">
           <span className={`text-[9px] font-mono font-bold px-1.5 py-0.5 rounded-full border flex items-center gap-1 ${
             churnRatio > 0.66
