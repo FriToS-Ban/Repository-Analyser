@@ -843,8 +843,14 @@ const GraphCanvas: React.FC<GraphProps> = ({ data, selectedFile, onSelectFile, d
               if (lang === "typescript") return "#0891b2";
               return "#4b5563";
             }}
+            onNodeClick={(_event, node) => {
+              const folderId = node.data?.isFolder ? node.id : node.parentId;
+              if (folderId) {
+                fitView({ nodes: [{ id: folderId }], duration: 800, padding: 0.3 });
+              }
+            }}
             maskColor="rgba(15, 23, 42, 0.7)"
-            className="bg-slate-950/80 border border-slate-800 rounded-lg"
+            className="bg-slate-950/80 border border-slate-800 rounded-lg cursor-pointer"
           />
           <Background color="#1e293b" gap={16} size={1} />
         </ReactFlow>
