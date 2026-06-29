@@ -42,6 +42,7 @@ class RefactorRequest(BaseModel):
 
 class RepoSummaryRequest(BaseModel):
     repo_path: str
+    force: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -107,9 +108,10 @@ def repo_summary(request: RepoSummaryRequest):
     # Cache key: repo path + number of nodes (cheap proxy for graph version)
     cache_key = f"repo-summary:{repo_abs}"
     content_hash = hashlib.sha256(f"{len(nodes)}{len(edges)}".encode()).hexdigest()
-    cached = cache.get_summary(cache_key, content_hash)
-    if cached:
-        return {"summary": cached, "cached": True}
+    if not request.force:
+        cached = cache.get_summary(cache_key, content_hash)
+        if cached:
+            return {"summary": cached, "cached": True}
 
     api_key = os.environ.get("NVIDIA_API_KEY")
     if not api_key:

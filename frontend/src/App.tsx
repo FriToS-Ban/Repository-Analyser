@@ -83,15 +83,16 @@ function App() {
   const [loadingRepoSummary, setLoadingRepoSummary] = useState(false);
   const [showRepoSummary, setShowRepoSummary] = useState(false);
 
-  const handleRepoSummary = async () => {
+  const handleRepoSummary = async (force = false) => {
     setShowRepoSummary(true);
-    if (repoSummary) return; // already fetched
+    if (!force && repoSummary) return; // already fetched
     setLoadingRepoSummary(true);
+    setRepoSummary(null);
     try {
       const res = await fetch(`${API_BASE_URL}/api/repo-summary`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ repo_path: repoPath.trim() }),
+        body: JSON.stringify({ repo_path: repoPath.trim(), force }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -565,7 +566,7 @@ function App() {
               {/* Refresh */}
               {!loadingRepoSummary && (
                 <button
-                  onClick={() => { setRepoSummary(null); handleRepoSummary(); }}
+                  onClick={() => handleRepoSummary(true)}
                   className="self-end text-[10px] font-semibold text-slate-500 hover:text-slate-300 transition-colors cursor-pointer shrink-0"
                 >
                   Regenerate
