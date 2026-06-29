@@ -540,9 +540,9 @@ function App() {
         {/* Repo-level architectural summary modal */}
         {showRepoSummary && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm" onClick={() => setShowRepoSummary(false)}>
-            <div className="relative w-full max-w-2xl bg-[#0f172a] border border-slate-700 rounded-2xl shadow-2xl flex flex-col gap-4 p-6" onClick={(e) => e.stopPropagation()}>
+            <div className="relative w-full max-w-2xl max-h-[85vh] bg-[#0f172a] border border-slate-700 rounded-2xl shadow-2xl flex flex-col gap-4 p-6 overflow-hidden" onClick={(e) => e.stopPropagation()}>
               {/* Header */}
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between shrink-0">
                 <div className="flex items-center gap-2">
                   <BookOpen className="h-5 w-5 text-indigo-400" />
                   <h2 className="font-bold text-slate-100 text-base">Repository Overview</h2>
@@ -552,7 +552,7 @@ function App() {
                 </button>
               </div>
               {/* Body */}
-              <div className="min-h-[120px] flex items-start">
+              <div className="flex-1 overflow-y-auto pr-2 min-h-[120px]">
                 {loadingRepoSummary ? (
                   <div className="w-full flex flex-col items-center justify-center py-10 gap-3">
                     <Loader2 className="h-8 w-8 text-indigo-400 animate-spin" />
@@ -566,7 +566,7 @@ function App() {
               {!loadingRepoSummary && (
                 <button
                   onClick={() => { setRepoSummary(null); handleRepoSummary(); }}
-                  className="self-end text-[10px] font-semibold text-slate-500 hover:text-slate-300 transition-colors cursor-pointer"
+                  className="self-end text-[10px] font-semibold text-slate-500 hover:text-slate-300 transition-colors cursor-pointer shrink-0"
                 >
                   Regenerate
                 </button>
