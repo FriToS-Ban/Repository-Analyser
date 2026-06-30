@@ -9,6 +9,20 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from openai import OpenAI
 
+# Load environment variables from .env file if present
+for env_dir in [os.path.dirname(__file__), os.path.join(os.path.dirname(__file__), "..")]:
+    dotenv_path = os.path.join(env_dir, ".env")
+    if os.path.exists(dotenv_path):
+        with open(dotenv_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#"):
+                    key, _, value = line.partition("=")
+                    key = key.strip()
+                    value = value.strip().strip("'\"")
+                    os.environ[key] = value
+
+
 from repo_parser import parse_repo, parse_repo_at_ref, diff_graphs
 import cache
 
@@ -140,7 +154,7 @@ def repo_summary(request: RepoSummaryRequest):
 
     try:
         response = client.chat.completions.create(
-            model="meta/llama-3.1-8b-instruct",
+            model="deepseek-ai/deepseek-v4-flash",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=400,
         )
@@ -274,7 +288,7 @@ def summarise_file(request: SummariseRequest):
         prompt = f"Explain what this code file does in 3 simple sentences. Be concise. File: {request.file_path}\n\n{content}"
         
         response = client.chat.completions.create(
-            model="meta/llama-3.1-8b-instruct",
+            model="deepseek-ai/deepseek-v4-flash",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=200
         )
@@ -363,7 +377,7 @@ def refactor_suggest(request: RefactorRequest):
         )
 
         response = client.chat.completions.create(
-            model="meta/llama-3.1-8b-instruct",
+            model="deepseek-ai/deepseek-v4-flash",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=500,
         )

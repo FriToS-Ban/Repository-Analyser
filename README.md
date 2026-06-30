@@ -1,6 +1,6 @@
 # Repository Structure Analysis & Visualisation System
 
-A full-stack, enterprise-grade developer tool designed to parse local Git repositories, construct interactive dependency graphs using React Flow, highlight architectural bottlenecks, and generate AI-powered codebase explanations via the NVIDIA NIM API (`meta/llama-3.1-8b-instruct`).
+A full-stack, enterprise-grade developer tool designed to parse local Git repositories, construct interactive dependency graphs using React Flow, highlight architectural bottlenecks, and generate AI-powered codebase explanations via the NVIDIA NIM API (`deepseek-ai/deepseek-v4-flash`).
 
 ---
 
@@ -95,7 +95,7 @@ repo-analyser/
 - **Canvas Tools**: Includes minimap navigation, fit-to-view auto-centering, instant filename search filtering, language filtering pills, and one-click high-resolution PNG canvas export using `html-to-image`.
 
 ### 2. AI-Powered Code Explanations & LLM Integration
-- **NVIDIA NIM Integration**: Connects to NVIDIA's hosted LLM endpoint (`meta/llama-3.1-8b-instruct`) via the standard OpenAI SDK format.
+- **NVIDIA NIM Integration**: Connects to NVIDIA's hosted LLM endpoint (`deepseek-ai/deepseek-v4-flash`) via the standard OpenAI SDK format.
 - **Context Management**: Reads file contents, truncating files larger than 500KB or capping prompts at 6,000 characters to optimize token usage and prevent payload overflow.
 - **Concise Summaries**: Generates 3-sentence explanations explaining what each module does upon clicking a node in the graph.
 - **Fallback Capability**: If `NVIDIA_API_KEY` is not provided, the system seamlessly outputs structured local placeholders so UI testing remains functional.
@@ -166,13 +166,13 @@ repo-analyser/
    pip install -r requirements.txt
    ```
 
-5. Set your NVIDIA API Key and start the server:
+5. Set your NVIDIA API Key (either by creating a `backend/.env` file with `NVIDIA_API_KEY="your_key"` or in your shell env) and start the server:
    ```powershell
    $env:NVIDIA_API_KEY="your_nvidia_api_key_here"
    uvicorn main:app --reload --port 8000
    ```
 
-*(Alternative for Windows Command Prompt `cmd.exe`: Use `env\Scripts\activate.bat` and set environment variables using `set NVIDIA_API_KEY=your_key` with no spaces).*
+*(Alternative for Windows Command Prompt `cmd.exe`: Use `env\Scripts\activate.bat` and set environment variables using `set NVIDIA_API_KEY=your_key` with no spaces, or use the `.env` file).*
 
 #### Linux / macOS
 
