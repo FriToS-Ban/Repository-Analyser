@@ -1,6 +1,6 @@
 # Repository Structure Analysis & Visualisation System
 
-A full-stack, enterprise-grade developer tool designed to parse local Git repositories, construct interactive dependency graphs using React Flow, highlight architectural bottlenecks, and generate AI-powered codebase explanations via the NVIDIA NIM API (`deepseek-ai/deepseek-v4-flash`).
+A full-stack, enterprise-grade developer tool designed to parse local Git repositories, construct interactive dependency graphs using React Flow, highlight architectural bottlenecks, and generate AI-powered codebase explanations via the NVIDIA NIM API (`minimaxai/minimax-m3` or dynamic).
 
 ---
 
@@ -95,7 +95,7 @@ repo-analyser/
 - **Canvas Tools**: Includes minimap navigation, fit-to-view auto-centering, instant filename search filtering, language filtering pills, and one-click high-resolution PNG canvas export using `html-to-image`.
 
 ### 2. AI-Powered Code Explanations & LLM Integration
-- **NVIDIA NIM Integration**: Connects to NVIDIA's hosted LLM endpoint (`deepseek-ai/deepseek-v4-flash`) via the standard OpenAI SDK format.
+- **NVIDIA NIM Integration**: Connects to NVIDIA's hosted LLM endpoint (defaults to `minimaxai/minimax-m3` or loaded via `NVIDIA_MODEL` env variable) via the standard OpenAI SDK format.
 - **Context Management**: Reads file contents, truncating files larger than 500KB or capping prompts at 6,000 characters to optimize token usage and prevent payload overflow.
 - **Concise Summaries**: Generates 3-sentence explanations explaining what each module does upon clicking a node in the graph.
 - **Fallback Capability**: If `NVIDIA_API_KEY` is not provided, the system seamlessly outputs structured local placeholders so UI testing remains functional.

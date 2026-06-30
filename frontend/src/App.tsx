@@ -83,16 +83,17 @@ function App() {
   const [loadingRepoSummary, setLoadingRepoSummary] = useState(false);
   const [showRepoSummary, setShowRepoSummary] = useState(false);
 
-  const handleRepoSummary = async (force = false) => {
+  const handleRepoSummary = async (force: boolean | any = false) => {
+    const shouldForce = force === true;
     setShowRepoSummary(true);
-    if (!force && repoSummary) return; // already fetched
+    if (!shouldForce && repoSummary) return; // already fetched
     setLoadingRepoSummary(true);
     setRepoSummary(null);
     try {
       const res = await fetch(`${API_BASE_URL}/api/repo-summary`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ repo_path: repoPath.trim(), force }),
+        body: JSON.stringify({ repo_path: repoPath.trim(), force: shouldForce }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -311,7 +312,7 @@ function App() {
           {graphData && (
             <div className="flex items-center gap-2">
               <button
-                onClick={handleRepoSummary}
+                onClick={() => handleRepoSummary(false)}
                 disabled={loadingRepoSummary}
                 className="flex items-center gap-1.5 font-semibold text-xs px-4 py-2.5 rounded-lg transition-all whitespace-nowrap border cursor-pointer bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700 disabled:opacity-50"
               >

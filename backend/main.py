@@ -153,8 +153,9 @@ def repo_summary(request: RepoSummaryRequest):
     )
 
     try:
+        model = os.environ.get("NVIDIA_MODEL", "minimaxai/minimax-m3")
         response = client.chat.completions.create(
-            model="deepseek-ai/deepseek-v4-flash",
+            model=model,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=400,
         )
@@ -287,8 +288,9 @@ def summarise_file(request: SummariseRequest):
         
         prompt = f"Explain what this code file does in 3 simple sentences. Be concise. File: {request.file_path}\n\n{content}"
         
+        model = os.environ.get("NVIDIA_MODEL", "minimaxai/minimax-m3")
         response = client.chat.completions.create(
-            model="deepseek-ai/deepseek-v4-flash",
+            model=model,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=200
         )
@@ -376,8 +378,9 @@ def refactor_suggest(request: RefactorRequest):
             f"File: {request.file_path}\n\n{content}"
         )
 
+        model = os.environ.get("NVIDIA_MODEL", "minimaxai/minimax-m3")
         response = client.chat.completions.create(
-            model="deepseek-ai/deepseek-v4-flash",
+            model=model,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=500,
         )
